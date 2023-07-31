@@ -1,0 +1,152 @@
+/*******************************************************************************************
+
+			                   #     #     #                
+			                  # #    #     #                
+			                 #   #   #     #                
+			                #     #  #     #                
+			                #######   #   #                 
+			                #     #    # #                  
+			                #     #     #                   
+			 #####                                          
+			#     #   ####   #####   ######  #####    ####  
+			#        #    #  #    #  #       #    #  #      
+			#        #    #  #    #  #####   #    #   ####  
+			#        #    #  #    #  #       #####        # 
+			#     #  #    #  #    #  #       #   #   #    # 
+			 #####    ####   #####   ######  #    #   ####  
+ 
+Program Name:		Projector Sony VPL-FX40
+Programmer:		Patrick Wright
+Purpose / Notes:	
+					To Control a Sony VPL-FX40 Projector.
+
+*******************************************************************************************
+
+	Compiler Directives
+
+*******************************************************************************************/
+#enable_dynamic
+#category "23" // Projector TODO
+#default_volatile
+
+/*******************************************************************************************
+
+	Inputs and Outputs
+
+*******************************************************************************************/
+string_input RouterResp$[20], _skip_;
+
+digital_input powerOn, powerOff, selectSourceHDMI1, _skip_, pollProjector;
+
+string_output RouterCmd$;
+
+
+
+
+/*******************************************************************************************
+
+  Global Variables
+
+*******************************************************************************************/
+string moduleName[20];
+string currentPowerStatus[20];
+string lastCommand[20];
+
+/*******************************************************************************************
+
+	Includes
+
+*******************************************************************************************/
+#user_library "Logging"
+
+/*******************************************************************************************
+
+	Functions
+
+*******************************************************************************************/
+function Send(string message)
+{
+	makestring(RouterCmd$, "%s", message);
+}
+
+function PwrON() 
+{
+	string command[20];
+	makestring(command, "power \"on\"" );
+	Send(command);
+	lastCommand = "on";
+}
+
+function PwrOFF() 
+{
+	string command[20];
+	makestring(command, "power \"off\"");
+	Send(command);
+	lastCommand = "off";
+}
+
+function setSourceHDMI1() 
+{
+	string command[20];
+	makestring(command, "input \"hdmi1\"");
+	Send(command);
+}
+
+function pollProjectorState()
+{
+	string queryPowerState[20];
+	
+	// Query the projector for its current power status
+	makestring(queryPowerState, "power_status ?");
+	Send(queryPowerState);
+
+	// Store the received power status from the projector
+	currentPowerStatus = RouterResp$;
+
+	// Comparing last command against current projector status
+	// If projector is off, but last command was on, turn the projector on
+	if (currentPowerStatus = "\"standby\"" && lastCommand = "on")
+	{
+		PwrON();
+	}
+	// If projector is on but last command was off, turn the projector off
+	if (currentPowerStatus = "\"on\"" && lastCommand = "off")
+	{
+		PwrOFF();
+	}
+}
+
+/*******************************************************************************************
+
+	Events
+
+*******************************************************************************************/
+
+push powerOn
+{
+	PwrON();
+}
+
+push powerOff
+{
+	PwrOFF();
+}
+
+push selectSourceHDMI1
+{
+	setSourceHDMI1();
+}
+
+push pollProjector
+{
+	pollProjectorState();
+}
+
+/*******************************************************************************************
+
+  Main Function
+
+*******************************************************************************************/
+Function Main() {
+	moduleName = "Sony VPL-FX40 Projector.usp";
+  }
