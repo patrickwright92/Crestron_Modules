@@ -1,0 +1,783 @@
+/*******************************************************************************************
+ 
+Program Name:	Samsung LCD MExx.usp
+Programmer:		Patrick Wright
+Purpose / Notes:	
+					Control module for Samsung LCD MExx series
+*********************************************************************************************/
+
+
+#CATEGORY "24" // TV/Video Projector
+ 
+#SYMBOL_NAME "Samsung_LCD_MExx"
+
+#default_volatile
+#enable_stack_checking
+#large_stack
+
+#user_library "UtilLib_DisplayCommonFunctions"
+
+//the projector will return useful commands 8 characters long                                     
+#define_constant nPROJ_RESPONSE_LEN 8
+
+#define_constant nMAX_DISPLAY_RESP_LEN 200
+#define_constant nMAX_DISPLAY_COMMAND_LEN 20
+#define_constant nMAX_PROJ_INPUT_BUFFER_LEN 255
+#define_constant nMAX_VOL_STR_LEN 15
+#define_constant nMAX_DISPLAY_ID_LEN 10
+
+// *NOTE*  ID=0 is represented as 0xFF
+
+/***************************************************/                                        
+/*   Display Commands                              */
+/***************************************************/
+//power
+#define_constant sDISPLAY_POWER_ON "\xAA\x11\x00\x01\x01"
+#define_constant sDISPLAY_POWER_OFF "\xAA\x11\x00\x01\x00"
+      
+//input
+#define_constant sDISPLAY_INPUT_VID_1 "\xAA\x14\x00\x01\x0C" 
+#define_constant sDISPLAY_INPUT_VID_6 "\xAA\x14\x00\x01\x30" //RF (TV)
+#define_constant sDISPLAY_INPUT_VID_7 "\xAA\x14\x00\x01\x40" //Digital TV
+#define_constant sDISPLAY_INPUT_YC_1 "\xAA\x14\x00\x01\x04"  
+#define_constant sDISPLAY_INPUT_YUV_1 "\xAA\x14\x00\x01\x08" 
+
+#define_constant sDISPLAY_INPUT_RGB_1 "\xAA\x14\x00\x01\x14" 
+#define_constant sDISPLAY_INPUT_RGB_2 "\xAA\x14\x00\x01\x1E" 
+#define_constant sDISPLAY_INPUT_DVI_1 "\xAA\x14\x00\x01\x18" 
+#define_constant sDISPLAY_INPUT_DVI_2 "\xAA\x14\x00\x01\x1F" //DVI_video
+
+#define_constant sDISPLAY_INPUT_HDMI_1 "\xAA\x14\x00\x01\x21" //HDMI 1
+#define_constant sDISPLAY_INPUT_HDMI_2 "\xAA\x14\x00\x01\x23" //HDMI 2
+#define_constant sDISPLAY_INPUT_HDMI_3 "\xAA\x14\x00\x01\x22" //HDMI 1_PC
+#define_constant sDISPLAY_INPUT_HDMI_4 "\xAA\x14\x00\x01\x24" //HDMI 2_PC
+
+#define_constant sDISPLAY_INPUT_DP_1 "\xAA\x14\x00\x01\x25" //Display Port
+
+
+//vmute
+#define_constant sDISPLAY_VMUTE_ON ""
+#define_constant sDISPLAY_VMUTE_OFF ""
+
+//amute
+#define_constant sDISPLAY_AMUTE_ON "\xAA\x13\x00\x01\x01"
+#define_constant sDISPLAY_AMUTE_OFF "\xAA\x13\x00\x01\x00"
+
+//aspect
+#define_constant sDISPLAY_ASPECT_16_9 "\xAA\x18\x00\x01\x01"
+#define_constant sDISPLAY_ASPECT_04_3 "\xAA\x18\x00\x01\x0B"
+#define_constant sDISPLAY_ASPECT_ZOOM "\xAA\x18\x00\x01\x04"
+
+//volume
+#define_constant sDISPLAY_VOLUME_INC_UP ""
+#define_constant sDISPLAY_VOLUME_INC_DOWN ""
+#define_constant sDISPLAY_VOLUME_LEV "\xAA\x12\x00\x01" //volume from 0 to 100 hex 0-64
+            
+/****************************************************/
+/*     Poll Commands                                */
+/****************************************************/
+#define_constant sDISPLAY_POLL_POWER "\xAA\x11\x00\x00"
+#define_constant sDISPLAY_POLL_INPUT "\xAA\x14\x00\x00"
+#define_constant sDISPLAY_POLL_ASPECT "\xAA\x18\x00\x00"
+#define_constant sDISPLAY_POLL_LAMP_HOURS ""
+#define_constant sDISPLAY_POLL_VMUTE ""
+#define_constant sDISPLAY_POLL_LAMP_1 ""
+#define_constant sDISPLAY_POLL_AMUTE "\xAA\x13\x00\x00"
+#define_constant sDISPLAY_POLL_VOLUME "\xAA\x12\x00\x00" 
+     
+/*******************************************************/          
+/*       Display Feedback                              */
+/*******************************************************/
+//power feedback
+#define_constant sDISPLAY_POWER_ON_1_FB "\xAA\xFF\x00\x03\x41\x11\x01"
+#define_constant sDISPLAY_POWER_ON_2_FB "\xAA\xFF\x00\x03\x4E\x11\x01" //Returned in whitemode
+#define_constant sDISPLAY_POWER_OFF_FB  "\xAA\xFF\x00\x03\x41\x11\x00"
+                         
+//input feedback
+#define_constant sDISPLAY_INPUT_VID_1_FB "\xAA\xFF\x00\x03\x41\x14\x0C"
+#define_constant sDISPLAY_INPUT_VID_6_FB "\xAA\xFF\x00\x03\x41\x14\x30"
+#define_constant sDISPLAY_INPUT_VID_7_FB "\xAA\xFF\x00\x03\x41\x14\x40"
+
+#define_constant sDISPLAY_INPUT_YC_1_FB "\xAA\xFF\x00\x03\x41\x14\x04"
+#define_constant sDISPLAY_INPUT_YUV_1_FB "\xAA\xFF\x00\x03\x41\x14\x08"
+#define_constant sDISPLAY_INPUT_RGB_1_FB "\xAA\xFF\x00\x03\x41\x14\x14"
+#define_constant sDISPLAY_INPUT_RGB_2_FB "\xAA\xFF\x00\x03\x41\x14\x1E"
+
+//both DVIs are used as valid DVI feedback. The TV automatically changes
+//between PC and AV mode depending on the resolution and TV 
+#define_constant sDISPLAY_INPUT_DVI_1_FB "\xAA\xFF\x00\x03\x41\x14\x18"
+#define_constant sDISPLAY_INPUT_DVI_2_FB "\xAA\xFF\x00\x03\x41\x14\x1F"
+                                                                        
+//both HDMIs are used as valid HDMI feedback. The VC automatically changes
+//between PC and AV mode and depending on the resolution and TV
+#define_constant sDISPLAY_INPUT_HDMI_1_FB "\xAA\xFF\x00\x03\x41\x14\x21"
+#define_constant sDISPLAY_INPUT_HDMI_2_FB "\xAA\xFF\x00\x03\x41\x14\x23"
+#define_constant sDISPLAY_INPUT_HDMI_3_FB "\xAA\xFF\x00\x03\x41\x14\x22" //HDMI 1 PC
+#define_constant sDISPLAY_INPUT_HDMI_4_FB "\xAA\xFF\x00\x03\x41\x14\x24" //HDMI 2 PC
+ 
+#define_constant sDISPLAY_INPUT_DP_1_FB   "\xAA\xFF\x00\x03\x41\x14\x25"   
+                                                                                               
+//if the user has started the whiteboard or inserted a 
+//USB flash drive then we dont want to force the input on the 
+//monitor back to the selected one. If the display command is 
+//reissued then it will start forcing the display back
+#define_constant sDISPLAY_WHITEBOARD_FB   "\xAA\xFF\x00\x03\x4E\x14\x01" //N=0x4E b"             
+#define_constant sDISPLAY_USB_READER_FB   "\xAA\xFF\x00\x03\x41\x14\x60" //A=0x41 `=0x60 0xb7
+
+//video mute feedback
+#define_constant sDISPLAY_VMUTE_ON_FB "NOT_SUPPORTED"
+#define_constant sDISPLAY_VMUTE_OFF_FB "NOT_SUPPORTED"
+
+//audio mute feedback
+#define_constant sDISPLAY_AMUTE_ON_FB "\xAA\xFF\x00\x03\x41\x13\x01"
+#define_constant sDISPLAY_AMUTE_OFF_FB "\xAA\xFF\x00\x03\x41\x13\x00"
+
+//aspect feedback
+#define_constant sDISPLAY_ASPECT_16_9_FB "\xAA\xFF\x00\x03\x41\x18\x01"
+#define_constant sDISPLAY_ASPECT_04_3_FB "\xAA\xFF\x00\x03\x41\x18\x0B"
+#define_constant sDISPLAY_ASPECT_ZOOM_FB "\xAA\xFF\x00\x03\x41\x18\x04"
+
+//volume feedback
+#define_constant sDISPLAY_VOL_LEV_FB "\xAA\xFF\x00\x03\x41\x12"
+                    
+//lamp hours feedback
+#define_constant sDISPLAY_LAMPHOURS_FB "NOT_SUPPORTED"
+
+//APA
+#define_constant sDISPLAY_APA "\xAA\x3D\x00\x01\x00"
+
+//Display response end of string token
+//#define_constant sDISPLAY_CMND_RESP "\x0d"
+                    
+//module inputs
+digital_input _skip_, _skip_;
+buffer_input biDisplayResponse$[nMAX_DISPLAY_RESP_LEN];
+analog_input aiPollCmd;
+analog_input aiDebugLev;
+  
+analog_input aiOneTypeCmd;
+analog_input aiLampHoursCmd;
+
+analog_input aiDisplayCmd[nMAX_DISPLAY_FUNCTIONS];
+
+               
+//module outputs
+digital_output _skip_, _skip_;
+string_output soDisplayCmd$;
+analog_output aoDisplayFB[nMAX_DISPLAY_FUNCTIONS];
+analog_output aoLampHoursFB[nMAX_DISPLAY_LAMPS];
+            
+
+//module parameters
+string_parameter spDisplayID[nMAX_DISPLAY_ID_LEN];
+
+#begin_parameter_properties spDisplayID
+  propValidUnits=unitString;
+  propDefaultUnit=unitString;
+  propDefaultValue="0"; 
+  propShortDescription="Display ID, 0 to 255";
+#end_parameter_properties
+
+ 
+//global variables         
+integer nLastCmd;
+integer nLampNumberRsp;
+integer bRXOK;
+integer nDisplayID;
+integer nDVI_1_CodedInput, nDVI_2_CodedInput;
+integer nHDMI_1_CodedInput, nHDMI_2_CodedInput;
+integer nHDMI_3_CodedInput, nHDMI_4_CodedInput;
+
+integer nWhiteBoardOrUSBInput, nCmdIssuedWhenOnWhiteboardOrUSB;
+integer nLastInputType, nLastInputNum;
+integer nChangingInputOffWhiteboardOnShutdown;
+
+string sProjInput[nMAX_PROJ_INPUT_BUFFER_LEN];
+       
+//print the data that is sent/receieved from the projector
+function printProjString(string _sPrintStr)
+{
+  integer _nI, _nPrintVal;
+  string _errMsg[nERR_MSG_LEN];
+    
+  //fnDebugMsg("Proj Array: ", getSymbolReferenceName(), 4, aiDebugLev);
+  
+  if(aiDebugLev >= 4)
+  {
+    print("Proj Array: ");
+
+	  for(_nI = 1 to len(_sPrintStr))
+	  {
+	    makestring(_errMsg, "%02X, ", byte(_sPrintStr, _nI));
+      print("%s", _errMsg);
+	  }
+	
+    print("\n");
+  }
+}
+      
+function sendDisplayCmd(string _sProjCmd)
+{
+  integer _nCmdLen, _nCheckSum, _nI;
+  string _sCheckSumString[10];
+  string _sOutCmd[20];
+          
+  //make sure that the projector command exists
+  if(len(_sProjCmd) > 3)
+  {
+	  //set the projector ID to the one specified                        
+	  setbyte(_sProjCmd, 3, nDisplayID);
+	      
+	  //add the checksum to the command
+	  _nCmdLen = len(_sProjCmd);
+	
+		_sCheckSumString = mid(_sProjCmd,2,(_nCmdLen - 1));
+	  
+	  _nCheckSum = 0;
+		for(_nI=1 to len(_sCheckSumString))
+		{
+			_nCheckSum = (_nCheckSum + byte(_sCheckSumString, _nI));
+		}
+	
+	  //send the command
+		_sOutCmd = _sProjCmd + chr(_nChecksum);
+	  soDisplayCmd$ = _sOutCmd;
+  }
+}
+
+function convertResp(string _sProjResp)
+{
+  integer _nLampStartPos;
+  string _sRemoveTemp[nMAX_PROJ_INPUT_BUFFER_LEN];
+  string _errMsg[nERR_MSG_LEN];
+  integer _nInputUnknown;
+  
+  //make sure this feedback is from the display 
+  //with the right ID
+  if(byte(_sProjResp, 3) = nDisplayID)
+  {
+	  //set the ID to 0 so it's response can be compared                        
+	  setbyte(_sProjResp, 3, 0); //chr(nDisplayID);
+	  
+	  //printProjString(_sProjResp);
+	
+	  //switch(nLastCmd)
+	  //{
+	    if(nLastCmd = nDISPLAY_POWER) //case(nDISPLAY_POWER && !nChangingInputOffWhiteboardOnShutdown):
+	    {
+	      if(find(sDISPLAY_POWER_ON_1_FB, _sProjResp, 1) || find(sDISPLAY_POWER_ON_2_FB, _sProjResp, 1)) 
+        {
+          aoDisplayFB[nDISPLAY_POWER] = nVAL_POWER_ON;
+        }
+	      else if(find(sDISPLAY_POWER_OFF_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_POWER] = nVAL_POWER_OFF;}
+	
+	      //if the power response if not recognised set the feedback to unknown, so that the command will be
+	      //resent 
+	      else {aoDisplayFB[nDISPLAY_POWER] = nVAL_STATE_UNKNOWN;}
+	    }
+	    if(nLastCmd = nDISPLAY_INPUT || nChangingInputOffWhiteboardOnShutdown) //case(nDISPLAY_INPUT):
+	    {
+        //print the display input response
+        //printProjString(_sProjResp);
+                     
+        //makestring(_errMsg, "WHITEBOARD=%u, CmdIssuedInWhiteBoard=%u\n", nWhiteBoardOrUSBInput, nCmdIssuedWhenOnWhiteboardOrUSB);
+        //fnDebugMsg(_errMsg, getSymbolReferenceName(), 5, aiDebugLev);
+        if((find(sDISPLAY_WHITEBOARD_FB, _sProjResp, 1) || find(sDISPLAY_USB_READER_FB, _sProjResp, 1)) && !nChangingInputOffWhiteboardOnShutdown)
+        {
+          if(nCmdIssuedWhenOnWhiteboardOrUSB)
+          {
+            //need to switch the tv back to the correct input
+            //make the feedback unknown.
+            aoDisplayFB[nDISPLAY_INPUT] = nVAL_STATE_UNKNOWN;
+          }
+          else
+          {
+            
+            aoDisplayFB[nDISPLAY_INPUT] = nTYPE_INPUT_SAFE; //aiDisplayCmd[nDISPLAY_INPUT];
+          }
+          //   "\xAA\xFF\x00\x03\x4E\x11\x01" //N=0x4E b"             
+          //#define_constant 
+
+          nWhiteBoardOrUSBInput = 1;
+        }
+        else
+        {
+          _nInputUnknown = 0;
+
+		      if(find(sDISPLAY_INPUT_HDMI_1_FB, _sProjResp, 1) || find(sDISPLAY_INPUT_HDMI_3_FB, _sProjResp, 1))      
+          {
+            if(aiDisplayCmd[nDISPLAY_INPUT] = nHDMI_3_CodedInput) {aoDisplayFB[nDISPLAY_INPUT] = nHDMI_3_CodedInput;}
+	          else {aoDisplayFB[nDISPLAY_INPUT] = nHDMI_1_CodedInput;}
+          }
+	        else if(find(sDISPLAY_INPUT_HDMI_2_FB, _sProjResp, 1) || find(sDISPLAY_INPUT_HDMI_4_FB, _sProjResp, 1))
+          {
+            if(aiDisplayCmd[nDISPLAY_INPUT] = nHDMI_4_CodedInput) {aoDisplayFB[nDISPLAY_INPUT] = nHDMI_4_CodedInput;}
+	          else {aoDisplayFB[nDISPLAY_INPUT] = nHDMI_2_CodedInput;}
+          }
+	        else if(find(sDISPLAY_INPUT_DP_1_FB, _sProjResp, 1))   {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_DP, 1);} 
+		      else if(find(sDISPLAY_INPUT_DVI_1_FB, _sProjResp, 1) || find(sDISPLAY_INPUT_DVI_2_FB, _sProjResp, 1)) 
+	        {          
+	          //if(aiDisplayCmd[nDISPLAY_INPUT] = nDVI_1_CodedInput) {aoDisplayFB[nDISPLAY_INPUT] = nDVI_1_CodedInput;}
+	          if(aiDisplayCmd[nDISPLAY_INPUT] = nDVI_2_CodedInput) {aoDisplayFB[nDISPLAY_INPUT] = nDVI_2_CodedInput;}
+	          else {aoDisplayFB[nDISPLAY_INPUT] = nDVI_1_CodedInput;}
+	        }
+		      //else if(find(sDISPLAY_INPUT_DVI_2_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_DVI, 2);}
+		      else if(find(sDISPLAY_INPUT_RGB_1_FB, _sProjResp, 1))  {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_RGB, 1);}
+		      else if(find(sDISPLAY_INPUT_RGB_2_FB, _sProjResp, 1))  {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_RGB, 2);}
+		      //else if(find(sDISPLAY_INPUT_HDMI_3_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_HDMI, 3);}
+		      //else if(find(sDISPLAY_INPUT_HDMI_4_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_HDMI, 4);}
+		      else if(find(sDISPLAY_INPUT_VID_1_FB, _sProjResp, 1))  {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_VID, 1);}
+		      else if(find(sDISPLAY_INPUT_VID_6_FB, _sProjResp, 1))  {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_VID, 6);}
+		      else if(find(sDISPLAY_INPUT_VID_7_FB, _sProjResp, 1))  {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_VID, 7);}
+		      else if(find(sDISPLAY_INPUT_YC_1_FB, _sProjResp, 1))   {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_YC, 1);}
+		      else if(find(sDISPLAY_INPUT_YUV_1_FB, _sProjResp, 1))  {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_YUV, 1);}
+		           
+		
+		      //if the power response if not recognised set the feedback to unknown, so that the command will be
+		      //resent
+		      else 
+          {
+            _nInputUnknown = 1;
+            aoDisplayFB[nDISPLAY_INPUT] = nVAL_STATE_UNKNOWN;
+          }
+                     
+          //only disable white board mode if the input has
+          //been changed successfully. This prevents any stray
+          //feedback from being taken as an input change
+          //The whiteboard will not exit if it has been used
+          //as a save changes message appears
+          if(!_nInputUnknown)
+          {
+            nWhiteBoardOrUSBInput = 0;
+            nCmdIssuedWhenOnWhiteboardOrUSB = 0;
+          }
+        }
+	    } 
+      else if(nLastCmd = nDISPLAY_VMUTE)
+	    //case(nDISPLAY_VMUTE):
+	    {
+	      if(find(sDISPLAY_VMUTE_ON_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_VMUTE] = nVAL_VMUTE_ON;}
+	      else if(find(sDISPLAY_VMUTE_OFF_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_VMUTE] = nVAL_VMUTE_OFF;}
+	
+	      //if the Video Mute response is not recognised set the feedback to unknown 
+	      else {aoDisplayFB[nDISPLAY_VMUTE] = nVAL_STATE_UNKNOWN;}
+	    }
+      else if(nLastCmd = nDISPLAY_AMUTE)
+	    //case(nDISPLAY_AMUTE):
+	    {
+	      if(find(sDISPLAY_AMUTE_ON_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_AMUTE] = nVAL_AMUTE_ON;}
+	      else if(find(sDISPLAY_AMUTE_OFF_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_AMUTE] = nVAL_AMUTE_OFF;}
+	
+	      //if the Audio Mute response if not recognised set the feedback to unknown
+	      else {aoDisplayFB[nDISPLAY_AMUTE] = nVAL_STATE_UNKNOWN;}
+	    }
+      else if(nLastCmd = nDISPLAY_ASPECT)
+	    //case(nDISPLAY_ASPECT):
+	    {
+	      if(find(sDISPLAY_ASPECT_16_9_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_ASPECT] = nVAL_ASPECT_16_9;} 
+	      else if(find(sDISPLAY_ASPECT_04_3_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_ASPECT] = nVAL_ASPECT_04_3;}
+	      else if(find(sDISPLAY_ASPECT_ZOOM_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_ASPECT] = nVAL_ASPECT_ZOOM;}
+	      
+	      //set the aspect to an unknown state if the aspect string is not recognised
+	      else {aoDisplayFB[nDISPLAY_ASPECT] = nVAL_STATE_UNKNOWN;}
+	    }
+      else if(nLastCmd = nDISPLAY_VOLUME)	
+      //case(nDISPLAY_VOLUME):
+	    {
+	      //set the feedback to the new volume
+	      if(find(sDISPLAY_VOL_LEV_FB, _sProjResp, 1))
+	      {
+	        _sRemoveTemp = remove(sDISPLAY_VOL_LEV_FB, _sProjResp);
+	        aoDisplayFB[nDISPLAY_VOLUME] = byte(_sProjResp, 1);
+	      }
+	    }
+      else if(nLastCmd = nDISPLAY_LAMPHOURS)
+	    //case(nDISPLAY_LAMPHOURS):
+	    {
+	      if(nLampNumberRsp = nLAMP_1_POLL)
+	      {
+	        _nLampStartPos = find(sDISPLAY_LAMPHOURS_FB, _sProjResp);
+		      if(_nLampStartPos)
+		      {	         
+					  aoLampHoursFB[nLAMP_1_POLL] = atoi(mid(_sProjResp, _nLampStartPos+4, len(_sProjResp) - _nLampStartPos));
+		      } 
+	      }    
+	    }    
+	  //}
+  }
+}
+ 
+function fnIssueDisplayInputCmd(integer _nInputType, integer _nInputNum)
+{
+  switch(_nInputType)
+  {
+    case(nTYPE_INPUT_HDMI): 
+    {
+      if(_nInputNum = 1) {sendDisplayCmd(sDISPLAY_INPUT_HDMI_1);}
+      else if(_nInputNum = 2) {sendDisplayCmd(sDISPLAY_INPUT_HDMI_2);}
+      else if(_nInputNum = 3) {sendDisplayCmd(sDISPLAY_INPUT_HDMI_3);}
+      else if(_nInputNum = 4) {sendDisplayCmd(sDISPLAY_INPUT_HDMI_4);}
+    }
+    case(nTYPE_INPUT_RGB): 
+    {
+      if(_nInputNum = 1) {sendDisplayCmd(sDISPLAY_INPUT_RGB_1);}
+      else if(_nInputNum = 2) {sendDisplayCmd(sDISPLAY_INPUT_RGB_2);}
+    }
+    case(nTYPE_INPUT_VID): 
+    {
+      if(_nInputNum = 1) {sendDisplayCmd(sDISPLAY_INPUT_VID_1);}
+      else if(_nInputNum = 6) {sendDisplayCmd(sDISPLAY_INPUT_VID_6);}
+      else if(_nInputNum = 7) {sendDisplayCmd(sDISPLAY_INPUT_VID_7);}
+    }
+    case(nTYPE_INPUT_DVI): 
+    {
+      if(_nInputNum = 1) {sendDisplayCmd(sDISPLAY_INPUT_DVI_1);}
+      else if(_nInputNum = 2) {sendDisplayCmd(sDISPLAY_INPUT_DVI_2);}
+    }
+    case(nTYPE_INPUT_YC): {sendDisplayCmd(sDISPLAY_INPUT_YC_1);}
+    case(nTYPE_INPUT_YUV): {sendDisplayCmd(sDISPLAY_INPUT_YUV_1);}
+    case(nTYPE_INPUT_DP): {sendDisplayCmd(sDISPLAY_INPUT_DP_1);}
+  }
+} 
+
+//decode the input strings 
+change biDisplayResponse$
+{
+  integer _nStillCmd;
+  integer _nRemoveDataLen, _nClearLen; 
+  integer _nInsertLen, _nCurrLen;
+  string _sTemp[nMAX_PROJ_INPUT_BUFFER_LEN];
+  
+   
+  if(bRXOK)
+	{
+		bRXOK = 0;
+     
+    while(len(biDisplayResponse$) > 0)
+		{
+      _nInsertLen = len(biDisplayResponse$);
+      _nCurrLen = len(sProjInput);
+         
+      //fnDebugMsg("Display Response: ", getSymbolReferenceName(), 4, aiDebugLev);
+      //printProjString(biDisplayResponse$);
+
+      //fnDebugMsg("sProjInput Before: ", getSymbolReferenceName(), 4, aiDebugLev);
+      //printProjString(sProjInput);
+
+      //if the new projector input is going to overflow the input buffer
+      //need to remove data from the input buffer to hold the new data
+	    if((_nInsertLen + _nCurrLen) > nMAX_PROJ_INPUT_BUFFER_LEN)
+	    {
+	      _nRemoveDataLen = (_nInsertLen + _nCurrLen) - nMAX_PROJ_INPUT_BUFFER_LEN;
+      
+        //remove data in the input stream to take the new data
+        if(_nRemoveDataLen >= _nCurrLen)
+        {
+          sProjInput = "";
+        }
+        else
+        {
+          _nRemoveDataLen = _nCurrLen - _nRemoveDataLen;
+          sProjInput = right(sProjInput, _nRemoveDataLen);
+        }         
+	    }
+      
+	    sProjInput = sProjInput + biDisplayResponse$;
+      clearbuffer(biDisplayResponse$);
+
+      //fnDebugMsg("sProjInput After: ", getSymbolReferenceName(), 4, aiDebugLev);
+      //printProjString(sProjInput);
+          
+      _nStillCmd = 1;
+              
+      //remove all of the valid commands from the input array
+      while(_nStillCmd)
+      {
+        _nClearLen = find("\xAA\xFF", sProjInput);
+
+        if(_nClearLen)
+        {
+          if(_nClearLen > 1)
+          {
+            _sTemp = removebylength(_nClearLen - 1, sProjInput);
+          }
+
+          if(len(sProjInput) >= nPROJ_RESPONSE_LEN)
+          {
+            //decode the projector response and convert it to module feedback
+            convertResp(removebylength(nPROJ_RESPONSE_LEN, sProjInput));
+          }
+          else
+          {
+            _nStillCmd = 0;
+          }
+          
+        }
+        else
+        {
+          _nStillCmd = 0; 
+        }
+      }      
+    }
+
+    bRXOK = 1;
+  }             
+}
+
+change aiDisplayCmd
+{
+  integer _nDisplayCmdIndex, _nInputType, _nInputNum;
+  string _sVolString[nMAX_VOL_STR_LEN];
+  string _errMsg[nERR_MSG_LEN];
+
+	_nDisplayCmdIndex = GetLastModifiedArrayIndex();
+  
+  nLastCmd = nVAL_STATE_UNKNOWN;
+ 
+  //which command needs to be sent
+  switch(_nDisplayCmdIndex)
+  {
+    case(nDISPLAY_POWER):
+    {
+      //make the last command the power command
+      nLastCmd = nDISPLAY_POWER;
+            
+      if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_POWER_ON) 
+      {
+        nChangingInputOffWhiteboardOnShutdown = 0;
+        fnDebugMsg("POWER_ON_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_POWER_ON);
+      }
+      else if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_POWER_OFF)
+      {
+        if(nWhiteBoardOrUSBInput)
+        {
+          nChangingInputOffWhiteboardOnShutdown = 1;
+
+          //make sure we select an input before power off if the 
+          //whiteboard or USB is active
+          fnIssueDisplayInputCmd(nLastInputType, nLastInputNum);
+        }
+        else
+        {
+          nChangingInputOffWhiteboardOnShutdown = 0;
+
+          fnDebugMsg("POWER_OFF_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+          sendDisplayCmd(sDISPLAY_POWER_OFF); 
+        }
+      } 
+    }
+    case(nDISPLAY_INPUT):
+    {
+      nLastCmd = nDISPLAY_INPUT;
+                 
+      decodeInput(aiDisplayCmd[_nDisplayCmdIndex], _nInputType, _nInputNum);
+                      
+      makestring(_errMsg, "INPUT CMD: Type: %u, Num: %u\n", _nInputType, _nInputNum);
+      fnDebugMsg(_errMsg, getSymbolReferenceName(), 5, aiDebugLev);
+        
+      //if a display command is issued when the USB or whiteboard
+      //functions are active then force the display to change
+      //back off these functions              
+      if(nWhiteBoardOrUSBInput)
+      {
+        nCmdIssuedWhenOnWhiteboardOrUSB = 1;
+      }
+        
+      //store the last input eelected
+      nLastInputType = _nInputType;
+      nLastInputNum  = _nInputNum;
+  
+      fnIssueDisplayInputCmd(_nInputType, _nInputNum); 
+    }
+    case(nDISPLAY_VMUTE):
+    {
+      nLastCmd = nDISPLAY_VMUTE;
+
+      if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_VMUTE_ON) 
+      {
+        fnDebugMsg("VIDEO_MUTE_ON_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_VMUTE_ON);
+      }
+      else if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_VMUTE_OFF)
+      {
+        fnDebugMsg("VIDEO_MUTE_OFF_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_VMUTE_OFF); 
+      } 
+    }
+    case(nDISPLAY_AMUTE):
+    {
+      nLastCmd = nDISPLAY_AMUTE;
+
+      if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_AMUTE_ON) 
+      {
+        fnDebugMsg("AUDIO_MUTE_ON_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_AMUTE_ON);
+      }
+      else if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_AMUTE_OFF)
+      {
+        fnDebugMsg("AUDIO_MUTE_OFF_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_AMUTE_OFF); 
+      }
+    }
+    case(nDISPLAY_ASPECT):
+    {
+      nLastCmd = nDISPLAY_ASPECT;
+
+      if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_ASPECT_16_9) 
+      {
+        fnDebugMsg("ASPECT_16_9_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_ASPECT_16_9);
+      }
+      else if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_ASPECT_04_3)
+      {
+        fnDebugMsg("ASPECT_04_3_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_ASPECT_04_3); 
+      }
+      else if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_ASPECT_ZOOM)
+      {
+        fnDebugMsg("ASPECT_ZOOM_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_ASPECT_ZOOM); 
+      }
+    }
+    case(nDISPLAY_VOLUME):
+    {
+                                
+      //send a volume increment up command 
+      if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_VOL_UP)
+      {
+        fnDebugMsg("VOLUME_INC_UP_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_VOLUME_INC_UP);
+      }
+      //send a volume increment down command
+      else if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_VOL_DOWN)
+      {
+        fnDebugMsg("VOLUME_INC_DOWN_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_VOLUME_INC_DOWN);
+      }
+      //send a volume level command
+      else 
+      {
+        nLastCmd = nDISPLAY_VOLUME;
+        _sVolString = sDISPLAY_VOLUME_LEV + chr(aiDisplayCmd[_nDisplayCmdIndex]); 
+         
+        makestring(_errMsg, "VOLUME CMD: Level: %u\n", aiDisplayCmd[_nDisplayCmdIndex]);
+        fnDebugMsg(_errMsg, getSymbolReferenceName(), 5, aiDebugLev);
+
+        sendDisplayCmd(_sVolString); 
+      }
+    }
+  }
+}
+   
+//send a lamp hours command. This has been seperated from
+//other commands and is out of the polling sequence as it is 
+//easier to control and is less confusing when polling multiple 
+//lamps
+change aiLampHoursCmd
+{
+  switch(aiLampHoursCmd)
+  {
+    case(nLAMP_1_POLL):
+    {
+      nLastCmd = nDISPLAY_LAMPHOURS;
+      nLampNumberRsp = nLAMP_1_POLL;
+
+      sendDisplayCmd(sDISPLAY_POLL_LAMP_1);
+    }
+  }     
+}
+
+change aiOneTypeCmd
+{
+  switch(aiOneTypeCmd)
+  {
+    case(nDISPLAY_APA):
+    {
+      fnDebugMsg("SENDING_APA\n", getSymbolReferenceName(), 5, aiDebugLev);
+      nLastCmd = nDISPLAY_APA;
+
+      sendDisplayCmd(sDISPLAY_APA);
+    }
+  }
+}
+
+
+change aiPollCmd
+{
+  switch(aiPollCmd)
+  {
+    case(nDISPLAY_POWER): 
+    {
+      fnDebugMsg("POWER_POLL\n", getSymbolReferenceName(), 5, aiDebugLev);
+      nLastCmd = nDISPLAY_POWER;
+      sendDisplayCmd(sDISPLAY_POLL_POWER);
+    }
+    case(nDISPLAY_INPUT):
+    {
+      fnDebugMsg("INPUT_POLL\n", getSymbolReferenceName(), 5, aiDebugLev);
+      nLastCmd = nDISPLAY_INPUT;
+      sendDisplayCmd(sDISPLAY_POLL_INPUT);
+    }
+    case(nDISPLAY_VMUTE):
+    {
+      fnDebugMsg("VIDEO_MUTE_POLL\n", getSymbolReferenceName(), 5, aiDebugLev);
+      nLastCmd = nDISPLAY_VMUTE;
+      sendDisplayCmd(sDISPLAY_POLL_VMUTE);
+    }
+    case(nDISPLAY_AMUTE):
+    {
+      fnDebugMsg("AUDIO_MUTE_POLL\n", getSymbolReferenceName(), 5, aiDebugLev);
+      nLastCmd = nDISPLAY_AMUTE;
+      sendDisplayCmd(sDISPLAY_POLL_AMUTE);
+    }
+    case(nDISPLAY_ASPECT):
+    {
+      fnDebugMsg("ASPECT_POLL\n", getSymbolReferenceName(), 5, aiDebugLev);
+      nLastCmd = nDISPLAY_ASPECT;
+      sendDisplayCmd(sDISPLAY_POLL_ASPECT);
+    }
+    case(nDISPLAY_VOLUME):
+    {
+      fnDebugMsg("VOLUME_POLL\n", getSymbolReferenceName(), 5, aiDebugLev);
+      nLastCmd = nDISPLAY_VOLUME;
+      sendDisplayCmd(sDISPLAY_POLL_VOLUME);
+    }
+  }
+}
+             
+
+Function Main()
+{
+  //initialise global variables
+  bRXOK = 1;
+  nLastCmd = nVAL_STATE_UNKNOWN;
+  sProjInput = "";
+     
+  nDisplayID = atoi(spDisplayID);
+  
+  //calculate the values for HDMI 1 to 4
+  nHDMI_1_CodedInput = codeInput(nTYPE_INPUT_HDMI, 1);
+  nHDMI_2_CodedInput = codeInput(nTYPE_INPUT_HDMI, 2);
+  nHDMI_3_CodedInput = codeInput(nTYPE_INPUT_HDMI, 3);
+  nHDMI_4_CodedInput = codeInput(nTYPE_INPUT_HDMI, 4);
+
+  //calculate the values for DVI 1 and 2 
+  nDVI_1_CodedInput = codeInput(nTYPE_INPUT_DVI, 1);
+  nDVI_2_CodedInput = codeInput(nTYPE_INPUT_DVI, 2);
+                 
+  nWhiteBoardOrUSBInput = 0;
+  nCmdIssuedWhenOnWhiteboardOrUSB = 0;
+  nLastInputType = nTYPE_INPUT_HDMI;
+  nLastInputNum = 1;
+  nChangingInputOffWhiteboardOnShutdown = 0;
+
+  //validate Display ID
+  if(nDisplayID > 255)
+  {
+    nDisplayID = 0;
+    fnDebugMsg("INVALID Display ID\n", getSymbolReferenceName(), 0, aiDebugLev);
+  }
+
+  waitforinitializationcomplete();
+}

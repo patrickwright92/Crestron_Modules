@@ -1,0 +1,680 @@
+/*******************************************************************************************
+ 
+Program Name:	Sony Projector VPL-FHZ55.usp
+Programmer:		Patrick Wright
+Purpose / Notes:	
+					A control module for a Sony Projector VPL-FHZ55 series
+********************************************************************************************/
+
+#CATEGORY "24" // TV/Video Projector
+ 
+#SYMBOL_NAME "Sony_Projector_VPL-FHZ55"
+
+#default_volatile
+#enable_stack_checking
+#large_stack
+
+#user_library "UtilLib_DisplayCommonFunctions"
+
+//the projector will return useful commands 8 characters long                                     
+#define_constant nPROJ_RESPONSE_LEN 5
+
+#define_constant nMAX_DISPLAY_RESP_LEN 255
+#define_constant nMAX_DISPLAY_COMMAND_LEN 20
+#define_constant nMAX_PROJ_INPUT_BUFFER_LEN 255
+#define_constant nMAX_VOL_STR_LEN 30
+#define_constant nMAX_DISPLAY_ID_LEN 10
+
+/***************************************************/                                        
+/*   Display Commands                              */
+/***************************************************/
+//power
+#define_constant sDISPLAY_POWER_ON	    "\xA9\x17\x2E\x00\x00\x00"
+#define_constant sDISPLAY_POWER_OFF     "\xA9\x17\x2F\x00\x00\x00"
+      
+//input
+#define_constant sDISPLAY_INPUT_VID_1 	"\xA9\x00\x01\x00\x00\x00" 	//Video
+#define_constant sDISPLAY_INPUT_YC_1    "\xA9\x00\x01\x00\x00\x01"  //S-Video
+
+#define_constant sDISPLAY_INPUT_RGB_1 	"\xA9\x00\x01\x00\x00\x02"	//RGBHV - Input A, Can be YPbPr
+#define_constant sDISPLAY_INPUT_RGB_2   "\xA9\x00\x01\x00\x00\x03"  //VGA   - Input B
+
+#define_constant sDISPLAY_INPUT_DVI_1   "\xA9\x00\x01\x00\x00\x04"  //DVI-D - Input C
+
+#define_constant sDISPLAY_INPUT_HDMI_1	"\xA9\x00\x01\x00\x00\x05"	//HDMI  - Input D 
+
+//vmute
+#define_constant sDISPLAY_VMUTE_ON	    "\xA9\x00\x30\x00\x00\x01"
+#define_constant sDISPLAY_VMUTE_OFF     "\xA9\x00\x30\x00\x00\x00"
+
+//amute
+#define_constant sDISPLAY_AMUTE_ON	    "\xA9\x00\x31\x00\x00\x01"
+#define_constant sDISPLAY_AMUTE_OFF     "\xA9\x00\x31\x00\x00\x00"
+
+//aspect
+#define_constant sDISPLAY_ASPECT_16_9   "\xA9\x00\x20\x00\x00\x0A"
+#define_constant sDISPLAY_ASPECT_04_3   "\xA9\x00\x20\x00\x00\x09"
+#define_constant sDISPLAY_ASPECT_ZOOM   "\xA9\x00\x20\x00\x00\x03"
+#define_constant sDISPLAY_ASPECT_AUTO   "\xA9\x00\x20\x00\x00\x01"
+
+//auto adjust (APA)
+#define_constant sDISPLAY_APA           "NOT_USED"
+
+//volume
+#define_constant sDISPLAY_VOLUME_LEV    "\xA9\x00\x16\x00\x00"
+        
+/*
+Menu       - \xA9\x17\x29\x00\x00\x00
+Cursor Up  - \xA9\x17\x35\x00\x00\x00
+Cursor Dn  - \xA9\x17\x36\x00\x00\x00
+Cursor Lf  - \xA9\x17\x34\x00\x00\x00
+Cursor Rg  - \xA9\x17\x33\x00\x00\x00
+Select     - \xA9\x17\x5A\x00\x00\x00
+*/
+
+//passthrough
+#define_constant sDISPLAY_CTRL_MENU	           "\xA9\x17\x29\x00\x00\x00" //This needs to be done on system start
+#define_constant nDISPLAY_CTRL_MENU            1
+#define_constant sDISPLAY_CTRL_SELECT          "\xA9\x17\x5A\x00\x00\x00"
+#define_constant nDISPLAY_CTRL_SELECT_NUM      2
+#define_constant sDISPLAY_CTRL_ARROW_UP        "\xA9\x17\x35\x00\x00\x00"
+#define_constant nDISPLAY_CTRL_ARROW_UP_NUM    3
+#define_constant sDISPLAY_CTRL_ARROW_DN        "\xA9\x17\x36\x00\x00\x00"
+#define_constant nDISPLAY_CTRL_ARROW_DN_NUM    4
+#define_constant sDISPLAY_CTRL_ARROW_LT        "\xA9\x17\x34\x00\x00\x00"
+#define_constant nDISPLAY_CTRL_ARROW_LT_NUM    5
+#define_constant sDISPLAY_CTRL_ARROW_RT        "\xA9\x17\x33\x00\x00\x00"
+#define_constant nDISPLAY_CTRL_ARROW_RT_NUM    6
+
+            
+/****************************************************/
+/*     Poll Commands                                */
+/****************************************************/
+#define_constant sDISPLAY_POLL_POWER		  "\xA9\x01\x02\x01\x00\x00"
+#define_constant sDISPLAY_POLL_INPUT		  "\xA9\x00\x01\x01\x00\x00"
+#define_constant sDISPLAY_POLL_ASPECT		  "\xA9\x00\x20\x01\x00\x00"
+//#define_constant sDISPLAY_POLL_LAMP_HOURS "\xA9\x01\x13\x01\x00\x00"
+#define_constant sDISPLAY_POLL_VMUTE 		  "\xA9\x00\x30\x01\x00\x00"
+#define_constant sDISPLAY_POLL_LAMP_1 		"\xA9\x01\x13\x01\x00\x00"
+#define_constant sDISPLAY_POLL_AMUTE 		  "\xA9\x00\x31\x01\x00\x00" //\x83\x00\x06\xFF\xFF - Not supported
+#define_constant sDISPLAY_POLL_VOLUME		  "\xA9\x00\x16\x01\x00\x00" 
+     
+/*******************************************************/          
+/*       Display Feedback                              */
+/*******************************************************/
+//power feedback
+#define_constant sDISPLAY_POWER_ON_FB	    "\x01\x02\x02\x00\x03"
+#define_constant sDISPLAY_POWER_OFF_FB	  "\x01\x02\x02\x00\x00"
+                         
+//input feedback
+#define_constant sDISPLAY_INPUT_VID_1_FB 	"\x00\x01\x02\x00\x00"    //Video
+#define_constant sDISPLAY_INPUT_YC_1_FB 	"\x00\x01\x02\x00\x01"    //S-Video
+
+#define_constant sDISPLAY_INPUT_RGB_1_FB 	"\x00\x01\x02\x00\x02"	  //RGBHV - Input A, Can be YPbPr
+#define_constant sDISPLAY_INPUT_RGB_2_FB 	"\x00\x01\x02\x00\x03"	  //VGA   - Input B
+                                         
+#define_constant sDISPLAY_INPUT_DVI_1_FB 	"\x00\x01\x02\x00\x04"	  //DVI-D - Input C
+                
+#define_constant sDISPLAY_INPUT_HDMI_1_FB	"\x00\x01\x02\x00\x05"	  //HDMI  - Input D 
+  
+//video mute feedback
+#define_constant sDISPLAY_VMUTE_ON_FB 	  "\x00\x30\x02\x00\x01"
+#define_constant sDISPLAY_VMUTE_OFF_FB 	  "\x00\x30\x02\x00\x00"
+
+//audio mute feedback
+#define_constant sDISPLAY_AMUTE_ON_FB 	  "\x00\x31\x02\x00\x01" 
+#define_constant sDISPLAY_AMUTE_OFF_FB	  "\x00\x31\x02\x00\x00"
+
+//aspect feedback
+#define_constant sDISPLAY_ASPECT_16_9_FB  "\x00\x20\x02\x00\x0A"
+#define_constant sDISPLAY_ASPECT_04_3_FB  "\x00\x20\x02\x00\x09"
+#define_constant sDISPLAY_ASPECT_ZOOM_FB  "\x00\x20\x02\x00\x03"
+#define_constant sDISPLAY_ASPECT_AUTO_FB  "\x00\x20\x02\x00\x01"
+
+//volume feedback
+#define_constant sDISPLAY_VOL_LEV_FB      "\x00\x16\x02\x00"
+                    
+//lamp hours feedback
+#define_constant sDISPLAY_LAMPHOURS_FB    "\x01\x13\x02" //Next to bytes are lamp hours High/Low
+
+//Display response end of string token
+#define_constant sDISPLAY_CMND_RESP "\x9A"
+#define_constant sRESPONSE_HEADER "\xA9"
+#define_constant sRESPONSE_DATA_LEN 5
+#define_constant sERROR_RESPONSE "\x00\x00\x03\x00\x00"
+                    
+//module inputs
+digital_input _skip_, _skip_;
+buffer_input biDisplayResponse$[nMAX_DISPLAY_RESP_LEN];
+analog_input aiPollCmd;
+analog_input aiDebugLev;
+  
+analog_input aiOneTypeCmd;
+analog_input aiLampHoursCmd;
+
+analog_input aiDisplayCmd[nMAX_DISPLAY_FUNCTIONS];
+
+               
+//module outputs
+digital_output _skip_, _skip_;
+string_output soDisplayCmd$;
+analog_output aoDisplayFB[nMAX_DISPLAY_FUNCTIONS];
+analog_output aoLampHoursFB[nMAX_DISPLAY_LAMPS];
+            
+
+//module parameters
+string_parameter spDisplayID[nMAX_DISPLAY_ID_LEN];
+
+#begin_parameter_properties spDisplayID
+  propValidUnits=unitString;
+  propDefaultUnit=unitString;
+  propDefaultValue="1"; 
+  propShortDescription="Display ID not used";
+#end_parameter_properties
+
+ 
+//global variables         
+integer nLastCmd;
+integer nLampNumberRsp;
+integer bRXOK;
+integer nDisplayID;
+string sProjInput[nMAX_PROJ_INPUT_BUFFER_LEN];
+       
+
+//print the data that is sent/receieved from the projector
+function printProjString(string _sPrintStr)
+{
+  integer _nI, _nPrintVal;
+  string _errMsg[nERR_MSG_LEN];
+    
+  //fnDebugMsg("Proj Array: ", getSymbolReferenceName(), 4, aiDebugLev);
+  
+  if(aiDebugLev >= 4)
+  {
+    print("Proj Array: ");
+
+	  for(_nI = 1 to len(_sPrintStr))
+	  {
+	    makestring(_errMsg, "%02X, ", byte(_sPrintStr, _nI));
+      print("%s", _errMsg);
+	  }
+	
+    print("\n");
+  }
+}
+
+//calculate checksum
+string_function calculateChecksum(string _sCmd)
+{
+	integer _nA, _nICS;
+	STRING sCS[1];
+
+	_nICS = 0;
+	for(_nA = 2 to len(_sCmd))
+	{
+		_nICS = _nICS | byte(_sCmd, _nA);
+	}
+
+  return(chr(_nICS));
+}
+ 
+//Make volume string
+string_function makeVolString(integer _nVolLevel)
+{
+	string _sVolStr[30];
+
+	//_sVolStr = sDISPLAY_VOLUME_LEV;
+  _sVolStr = sDISPLAY_VOLUME_LEV + chr(_nVolLevel);
+
+	return(_sVolStr);
+}
+      
+function sendDisplayCmd(string _sProjCmd)
+{	 
+	string _sCmd[30];         
+
+	//make sure that the projector command exists
+	if(len(_sProjCmd) > 1)
+  {
+		_sCmd = _sProjCmd + calculateChecksum(_sProjCmd) + "\x9A";
+	}
+  soDisplayCmd$ = _sCmd;
+}
+
+function convertResp(string _sProjResp)
+{
+  integer _nLampStartPos;
+  integer nLampHoursHighByte;
+  integer nLampHoursLowByte;
+  string _sRemoveTemp[nMAX_PROJ_INPUT_BUFFER_LEN];
+  
+  switch(nLastCmd)
+  {
+    case(nDISPLAY_POWER):
+    {
+      if(find(sDISPLAY_POWER_ON_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_POWER] = nVAL_POWER_ON;}
+      else if(find(sDISPLAY_POWER_OFF_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_POWER] = nVAL_POWER_OFF;}
+
+      //if the power response if not recognised set the feedback to unknown, so that the command will be
+      //resent 
+      else {aoDisplayFB[nDISPLAY_POWER] = nVAL_STATE_UNKNOWN;}
+    }
+
+    case(nDISPLAY_INPUT):
+    {
+       //Most likely to least likely input responses
+      if(find(sDISPLAY_INPUT_HDMI_1_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_HDMI, 1);}
+      else if(find(sDISPLAY_INPUT_DVI_1_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_DVI, 1);} 
+
+      else if(find(sDISPLAY_INPUT_RGB_1_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_RGB, 1);}
+      else if(find(sDISPLAY_INPUT_RGB_2_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_RGB, 2);}
+       	   
+      else if(find(sDISPLAY_INPUT_VID_1_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_VID, 1);}
+      else if(find(sDISPLAY_INPUT_YC_1_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_YC, 1);}
+
+      //if the power response if not recognised set the feedback to unknown, so that the command will be
+      //resent
+      else {aoDisplayFB[nDISPLAY_INPUT] = nVAL_STATE_UNKNOWN;}
+    } 
+    case(nDISPLAY_VMUTE):
+    {
+      if(find(sDISPLAY_VMUTE_ON_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_VMUTE] = nVAL_VMUTE_ON;}
+      else if(find(sDISPLAY_VMUTE_OFF_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_VMUTE] = nVAL_VMUTE_OFF;}
+
+      //if the Video Mute response is not recognised set the feedback to unknown 
+      else {aoDisplayFB[nDISPLAY_VMUTE] = nVAL_STATE_UNKNOWN;}
+    }
+    case(nDISPLAY_AMUTE):
+    {
+      if(find(sDISPLAY_AMUTE_ON_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_AMUTE] = nVAL_AMUTE_ON;}
+      else if(find(sDISPLAY_AMUTE_OFF_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_AMUTE] = nVAL_AMUTE_OFF;}
+
+      //if the Audio Mute response if not recognised set the feedback to unknown
+      else {aoDisplayFB[nDISPLAY_AMUTE] = nVAL_STATE_UNKNOWN;}
+    }
+    case(nDISPLAY_ASPECT):
+    {
+      if(find(sDISPLAY_ASPECT_16_9_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_ASPECT] = nVAL_ASPECT_16_9;} 
+      else if(find(sDISPLAY_ASPECT_04_3_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_ASPECT] = nVAL_ASPECT_04_3;}
+      else if(find(sDISPLAY_ASPECT_ZOOM_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_ASPECT] = nVAL_ASPECT_ZOOM;}
+      else if(find(sDISPLAY_ASPECT_AUTO_FB, _sProjResp, 1)) {aoDisplayFB[nDISPLAY_ASPECT] = nVAL_ASPECT_AUTO;}
+      
+      //set the aspect to an unknown state if the aspect string is not recognised
+      else {aoDisplayFB[nDISPLAY_ASPECT] = nVAL_STATE_UNKNOWN;}
+    }
+    case(nDISPLAY_VOLUME):
+    {
+      //set the feedback to the new volume
+      if(find(sDISPLAY_VOL_LEV_FB, _sProjResp, 1))
+      {
+        aoDisplayFB[nDISPLAY_VOLUME] = byte(_sProjResp, 5); 
+      }
+    } 
+    case(nDISPLAY_LAMPHOURS):
+    {
+      if(nLampNumberRsp = nLAMP_1_POLL)
+      {
+        nLampHoursHighByte = byte(_sProjResp, 4);
+        nLampHoursLowByte = byte(_sProjResp, 5);
+	           
+        aoLampHoursFB[nLAMP_1_POLL] = (nLampHoursHighByte * 256) + nLampHoursLowByte; 
+      }    
+    }    
+  }
+}
+	
+//decode the input strings 
+change biDisplayResponse$
+{
+	integer _nStillCmd;
+  integer _nRemoveDataLen, _nClearLen, _nClearLen1; 
+  integer _nInsertLen, _nCurrLen;
+  string _sTemp[nMAX_PROJ_INPUT_BUFFER_LEN];
+  
+	if(bRXOK)
+	{
+		bRXOK = 0;
+     
+    while(len(biDisplayResponse$) > 0)
+		{
+      _nInsertLen = len(biDisplayResponse$);
+      _nCurrLen = len(sProjInput);
+         
+      fnDebugMsg("Display Response: ", getSymbolReferenceName(), 4, aiDebugLev);
+      printProjString(biDisplayResponse$);
+
+      fnDebugMsg("sProjInput Before: ", getSymbolReferenceName(), 4, aiDebugLev);
+      printProjString(sProjInput);
+
+      //if the new projector input is going to overflow the input buffer
+      //need to remove data from the input buffer to hold the new data
+	    if((_nInsertLen + _nCurrLen) > nMAX_PROJ_INPUT_BUFFER_LEN)
+	    {
+	      _nRemoveDataLen = (_nInsertLen + _nCurrLen) - nMAX_PROJ_INPUT_BUFFER_LEN;
+      
+        //remove data in the input stream to take the new data
+        if(_nRemoveDataLen >= _nCurrLen)
+        {
+          sProjInput = "";
+        }
+        else
+        {
+          _nRemoveDataLen = _nCurrLen - _nRemoveDataLen;
+          sProjInput = right(sProjInput, _nRemoveDataLen);
+        }         
+	    }
+      
+	    sProjInput = sProjInput + biDisplayResponse$;
+      clearbuffer(biDisplayResponse$);
+
+      //fnDebugMsg("sProjInput After: ", getSymbolReferenceName(), 4, aiDebugLev);
+      //printProjString(sProjInput);
+          
+      _nStillCmd = 1;
+              
+      //remove all of the valid commands from the input array
+      while(_nStillCmd)
+      { 
+        _nClearLen = find(sRESPONSE_HEADER, sProjInput);
+         
+        //This will be 1 or greater if a response is found
+        if(_nClearLen)
+        {
+          _sTemp = remove(sRESPONSE_HEADER, sProjInput);
+          
+          //Only take a response if there is enough data.
+          //If not ignore this response
+          if(len(sProjInput) >= sRESPONSE_DATA_LEN)
+          {
+            //if this is an error response ignore it
+            if(!find(sERROR_RESPONSE, sProjInput))
+            {
+              convertResp(left(sProjInput, sRESPONSE_DATA_LEN));
+            }
+          }
+        }
+        else
+        {
+          _nStillCmd = 0; 
+        }
+      }      
+    }
+
+    bRXOK = 1;
+  }    
+}
+
+change aiDisplayCmd
+{
+ integer _nDisplayCmdIndex, _nInputType, _nInputNum;
+ string _sVolString[nMAX_VOL_STR_LEN];
+ string _errMsg[nERR_MSG_LEN];
+
+_nDisplayCmdIndex = GetLastModifiedArrayIndex();
+ 
+ nLastCmd = nVAL_STATE_UNKNOWN;
+
+ //which command needs to be sent
+ switch(_nDisplayCmdIndex)
+ {
+   case(nDISPLAY_POWER):
+   {
+     //make the last command the power command
+     nLastCmd = nDISPLAY_POWER;
+
+     if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_POWER_ON) 
+     {
+       fnDebugMsg("POWER_ON_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+       sendDisplayCmd(sDISPLAY_POWER_ON);
+     }
+     else if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_POWER_OFF)
+     {
+       fnDebugMsg("POWER_OFF_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+       sendDisplayCmd(sDISPLAY_POWER_OFF); 
+     } 
+   }
+   case(nDISPLAY_INPUT):
+   {
+     nLastCmd = nDISPLAY_INPUT;
+
+     decodeInput(aiDisplayCmd[_nDisplayCmdIndex], _nInputType, _nInputNum);
+                     
+     makestring(_errMsg, "INPUT CMD: Type: %u, Num: %u\n", _nInputType, _nInputNum);
+     fnDebugMsg(_errMsg, getSymbolReferenceName(), 5, aiDebugLev);                
+
+     switch(_nInputType)
+     {
+       case(nTYPE_INPUT_HDMI): 
+       {
+         if(_nInputNum = 1) 		  {sendDisplayCmd(sDISPLAY_INPUT_HDMI_1);}
+       }
+       case(nTYPE_INPUT_RGB): 
+       {
+         if(_nInputNum = 1)		    {sendDisplayCmd(sDISPLAY_INPUT_RGB_1);}
+         else if(_nInputNum = 2)	{sendDisplayCmd(sDISPLAY_INPUT_RGB_2);}
+       }
+       case(nTYPE_INPUT_DVI): 
+       {
+         if(_nInputNum = 1)		     {sendDisplayCmd(sDISPLAY_INPUT_DVI_1);}
+	       //else if(_nInputNum = 2)	{sendDisplayCmd(sDISPLAY_INPUT_DVI_2);}
+	       //else if(_nInputNum = 3)	{sendDisplayCmd(sDISPLAY_INPUT_DVI_3);}
+	       //else if(_nInputNum = 4)	{sendDisplayCmd(sDISPLAY_INPUT_DVI_4);}
+       }
+       case(nTYPE_INPUT_YC): 		{sendDisplayCmd(sDISPLAY_INPUT_YC_1);}
+       //case(nTYPE_INPUT_YUV):		
+	     //{
+		   //  if(_nInputNum = 1)		     {sendDisplayCmd(sDISPLAY_INPUT_YUV_1);}
+		   //  else if(_nInputNum = 2)	 {sendDisplayCmd(sDISPLAY_INPUT_YUV_2);}
+	     //}
+       //case(nTYPE_INPUT_DP):     	 {sendDisplayCmd(sDISPLAY_INPUT_DP_1);} 
+       case(nTYPE_INPUT_VID):   
+       {
+         if(_nInputNum = 1)        {sendDisplayCmd(sDISPLAY_INPUT_VID_1);}
+         //else if(_nInputNum = 2)   {sendDisplayCmd(sDISPLAY_INPUT_VID_2);}
+         //else if(_nInputNum = 3)   {sendDisplayCmd(sDISPLAY_INPUT_VID_3);}
+         //else if(_nInputNum = 6)   {sendDisplayCmd(sDISPLAY_INPUT_VID_6);} //TV
+         //else if(_nInputNum = 7)   {sendDisplayCmd(sDISPLAY_INPUT_VID_7);} //Shared
+       }
+     }  
+   }
+   case(nDISPLAY_VMUTE):
+   {
+     nLastCmd = nDISPLAY_VMUTE;
+
+     if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_VMUTE_ON) 
+     {
+       fnDebugMsg("VIDEO_MUTE_ON_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+       sendDisplayCmd(sDISPLAY_VMUTE_ON);
+     }
+     else if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_VMUTE_OFF)
+     {
+       fnDebugMsg("VIDEO_MUTE_OFF_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+       sendDisplayCmd(sDISPLAY_VMUTE_OFF); 
+     } 
+   }
+   case(nDISPLAY_AMUTE):
+   {
+     nLastCmd = nDISPLAY_AMUTE;
+
+     if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_AMUTE_ON) 
+     {
+       fnDebugMsg("AUDIO_MUTE_ON_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+       sendDisplayCmd(sDISPLAY_AMUTE_ON);
+     }
+     else if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_AMUTE_OFF)
+     {
+       fnDebugMsg("AUDIO_MUTE_OFF_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+       sendDisplayCmd(sDISPLAY_AMUTE_OFF);
+     }
+   }
+   case(nDISPLAY_ASPECT):
+   {
+     nLastCmd = nDISPLAY_ASPECT;
+
+     if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_ASPECT_16_9) 
+     {
+       fnDebugMsg("ASPECT_16_9_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+       sendDisplayCmd(sDISPLAY_ASPECT_16_9);
+     }
+     else if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_ASPECT_04_3)
+     {
+       fnDebugMsg("ASPECT_04_3_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+       sendDisplayCmd(sDISPLAY_ASPECT_04_3); 
+     }
+     else if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_ASPECT_ZOOM)
+     {
+       fnDebugMsg("ASPECT_ZOOM_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+       sendDisplayCmd(sDISPLAY_ASPECT_ZOOM); 
+     }
+   }
+   case(nDISPLAY_VOLUME):
+   {
+     nLastCmd = nDISPLAY_VOLUME;
+	         
+     makestring(_errMsg, "VOLUME CMD: Level: %u\n", aiDisplayCmd[_nDisplayCmdIndex]);
+     fnDebugMsg(_errMsg, getSymbolReferenceName(), 5, aiDebugLev);
+     _sVolString = makeVolString(aiDisplayCmd[_nDisplayCmdIndex]);
+
+     sendDisplayCmd(_sVolString); 
+   }
+ }
+}
+   
+//send a lamp hours command. This has been seperated from
+//other commands and is out of the polling sequence as it is 
+//easier to control and is less confusing when polling multiple 
+//lamps
+change aiLampHoursCmd
+{
+  switch(aiLampHoursCmd)
+  {
+    case(nLAMP_1_POLL):
+    {
+      nLastCmd = nDISPLAY_LAMPHOURS;
+      nLampNumberRsp = nLAMP_1_POLL;
+
+      sendDisplayCmd(sDISPLAY_POLL_LAMP_1);
+    }
+  }    
+}
+
+change aiOneTypeCmd
+{
+  integer _nPassThroughCmd;
+
+  if(aiOneTypeCmd >= nPASS_THROUGH)	//do pass through commands
+  {
+    _nPassThroughCmd = aiOneTypeCmd - nPASS_THROUGH;
+	
+	  switch(_nPassThroughCmd)
+	  {
+      case(nDISPLAY_CTRL_MENU):
+      {
+        fnDebugMsg("Remote Button Menu\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_CTRL_MENU); 
+      }
+      case(nDISPLAY_CTRL_SELECT_NUM):
+      {
+        fnDebugMsg("Remote Button Select\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_CTRL_SELECT); 
+      }
+      case(nDISPLAY_CTRL_ARROW_UP_NUM):
+      {
+        fnDebugMsg("Remote Button Arrow Up\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_CTRL_ARROW_UP); 
+      }
+      case(nDISPLAY_CTRL_ARROW_DN_NUM):
+      {
+        fnDebugMsg("Remote Button Arrow Down\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_CTRL_ARROW_DN); 
+      }
+      case(nDISPLAY_CTRL_ARROW_LT_NUM):
+      {
+        fnDebugMsg("Remote Button Arrow Left\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_CTRL_ARROW_LT); 
+      }
+      case(nDISPLAY_CTRL_ARROW_RT_NUM):
+      {
+        fnDebugMsg("Remote Button Arrow Right\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_CTRL_ARROW_RT); 
+      }
+ 		}
+  }
+  else
+  {	
+    switch(aiOneTypeCmd)
+    {
+      case(nDISPLAY_APA):
+      {
+        fnDebugMsg("SENDING_APA\n", getSymbolReferenceName(), 5, aiDebugLev);
+        nLastCmd = nDISPLAY_APA;
+
+        sendDisplayCmd(sDISPLAY_APA);
+      }
+    }
+  }
+}
+
+
+change aiPollCmd
+{
+  switch(aiPollCmd)
+  {
+    case(nDISPLAY_POWER): 
+    {
+      fnDebugMsg("POWER_POLL\n", getSymbolReferenceName(), 5, aiDebugLev);
+      nLastCmd = nDISPLAY_POWER;
+      sendDisplayCmd(sDISPLAY_POLL_POWER);
+    }
+    case(nDISPLAY_INPUT):
+    {
+      fnDebugMsg("INPUT_POLL\n", getSymbolReferenceName(), 5, aiDebugLev);
+      nLastCmd = nDISPLAY_INPUT;
+      sendDisplayCmd(sDISPLAY_POLL_INPUT);
+    }
+    case(nDISPLAY_VMUTE):
+    {
+      fnDebugMsg("VIDEO_MUTE_POLL\n", getSymbolReferenceName(), 5, aiDebugLev);
+      nLastCmd = nDISPLAY_VMUTE;
+      sendDisplayCmd(sDISPLAY_POLL_VMUTE);
+    }
+    case(nDISPLAY_AMUTE):
+    {
+      fnDebugMsg("AUDIO_MUTE_POLL\n", getSymbolReferenceName(), 5, aiDebugLev);
+      nLastCmd = nDISPLAY_AMUTE;
+      sendDisplayCmd(sDISPLAY_POLL_AMUTE);
+    }
+    case(nDISPLAY_ASPECT):
+    {
+      fnDebugMsg("ASPECT_POLL\n", getSymbolReferenceName(), 5, aiDebugLev);
+      nLastCmd = nDISPLAY_ASPECT;
+      sendDisplayCmd(sDISPLAY_POLL_ASPECT);
+    }
+    case(nDISPLAY_VOLUME):
+    {
+      fnDebugMsg("VOLUME_POLL\n", getSymbolReferenceName(), 5, aiDebugLev);
+      nLastCmd = nDISPLAY_VOLUME;
+      sendDisplayCmd(sDISPLAY_POLL_VOLUME);
+    }
+  }
+}
+             
+
+Function Main()
+{
+  //initialise global variables
+  bRXOK = 1;
+  nLastCmd = nVAL_STATE_UNKNOWN;
+  sProjInput = "";
+     
+  nDisplayID = atoi(spDisplayID);
+
+  //validate Display ID
+  if(nDisplayID > 255)
+  {
+    nDisplayID = 0;
+    fnDebugMsg("INVALID Display ID\n", getSymbolReferenceName(), 0, aiDebugLev);
+  }
+
+  waitforinitializationcomplete();
+}

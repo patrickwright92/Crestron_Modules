@@ -1,0 +1,106 @@
+/*******************************************************************************************
+ 
+Program Name:	Held.usp
+Programmer:		Patrick Wright
+Purpose / Notes:	
+					This module tells you when a signal has stayed low (or maybe high) for a given period of time.
+          Unlike a debounce, it only does either rising or falling edge, not both.
+
+*******************************************************************************************
+
+	Compiler Directives
+
+*******************************************************************************************/
+#HINT "Pulses when a signal is held for a period of time."
+
+#DEFAULT_VOLATILE
+#ENABLE_STACK_CHECKING
+#ENABLE_TRACE
+
+#HELP_BEGIN
+  This module tells you when a signal has stayed low (or maybe high) for a given period of time.
+  Unlike a debounce, it only does either rising or falling edge, not both.
+
+  The HoldTime must be specified in seconds.
+  The output will pulse when input is held high.
+#HELP_END
+
+/*******************************************************************************************
+
+	Inputs and Outputs
+
+*******************************************************************************************/
+DIGITAL_INPUT Enable, Trigger;
+DIGITAL_OUTPUT _SKIP_, Held;
+INTEGER_PARAMETER _SKIP_, _SKIP_, HoldTime;
+
+/*******************************************************************************************
+
+  Global Variables
+
+*******************************************************************************************/
+STRING moduleName[20];
+
+/*******************************************************************************************
+  
+  Parameter Properties
+
+*******************************************************************************************/
+
+#BEGIN_PARAMETER_PROPERTIES HoldTime
+   propValidUnits = unitDecimal; 
+   propDefaultUnit = unitDecimal; 
+#END_PARAMETER_PROPERTIES
+
+/*******************************************************************************************
+
+	Includes
+
+*******************************************************************************************/
+#user_library "Logging"
+
+/*******************************************************************************************
+
+	Functions
+
+*******************************************************************************************/
+
+function TriggerTimer()
+{
+  Wait (HoldTime*100,triggerHeldWait)
+    pulse(1,Held);
+}
+
+// Make sure that when the enable goes high (and low) 
+// we start or stop a timer if that is required.
+push Enable
+{
+  if (Trigger)
+    TriggerTimer();
+}
+release Enable
+{
+  CancelWait (triggerHeldWait);
+}
+
+push Trigger
+{
+  if (Enable)
+    TriggerTimer();
+}
+release Trigger
+{
+  CancelWait (triggerHeldWait);
+}
+
+/*******************************************************************************************
+
+  Main Function
+
+*******************************************************************************************/
+Function Main()
+{
+  moduleName = "Held.usp";
+}
+
+

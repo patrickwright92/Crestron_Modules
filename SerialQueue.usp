@@ -1,0 +1,238 @@
+/*******************************************************************************************
+ 
+Program Name:	SerialQueue.usp
+Programmer:		Patrick Wright
+Purpose / Notes:	
+					Serial Queue
+
+/***********************************************************************
+  Compiler Directives
+  (Uncomment and declare compiler directives as needed)
+***********************************************************************/
+#SYMBOL_NAME "SerialQueue"
+#HINT "Push ASCII strings in to pace them nicely"
+#DEFAULT_VOLATILE
+#ENABLE_TRACE
+#PRINT_TO_TRACE
+
+
+#define_constant MODULE_NAME "SerialQueue"
+
+#define_constant FALSE              0
+#define_constant TRUE               1
+
+#define_constant QUEUE_WIDTH        100          // Maximum number of elements.
+#define_constant QUEUE_DEPTH        1024         // Length of elements.
+#define_constant CH_POP             1            // Pulse to Pop the queue.
+#define_constant CH_NOT_EMPTY       2            // Indicates items are queued.
+#define_constant CH_FULL            3            // Indicates queue full.
+#define_constant CH_OVERFLOW        4            // Indicates queue overflow.
+
+
+
+#HELP_BEGIN
+A serial queue to gather up your strings and time them out.
+
+Init        - Use to flush and reinitialise the queue. This is done at start anyway.
+Pop         - Oscilate this when the HasElements output is high.
+In$         - Send serial strings in here.
+
+HasElements - Queue is not empty. Use this as a gate to your pop input.
+NumElements - Count of queue data.
+Out$        - where the strings go.
+
+#HELP_END
+
+
+/***********************************************************************
+  Include Libraries
+  (Uncomment and include additional librarys as needed)
+***********************************************************************/
+// #CRESTRON_LIBRARY ""
+// #USER_LIBRARY ""
+
+
+
+/***********************************************************************
+  DIGITAL, ANALOG and SERIAL INPUTS and OUTPUTS
+  (Uncomment and declare inputs and outputs as needed)
+***********************************************************************/
+               
+//digital_input _SKIP_;
+//digital_input _SKIP_;
+//digital_input _SKIP_; 
+
+digital_input Init, Pop;
+string_input In$[QUEUE_DEPTH];
+
+//digital_output _SKIP_;
+//digital_output _SKIP_;
+//digital_output _SKIP_;
+//digital_output _SKIP_;
+//digital_output _SKIP_;
+//digital_output _SKIP_;
+           
+digital_output HasElements;
+analog_output NumElements;
+string_output Out$; 
+                      
+
+
+/***********************************************************************
+  Global Variables
+  (Uncomment and declare global variables as needed)
+***********************************************************************/
+
+// Queue Variables
+string sQueue[QUEUE_WIDTH][QUEUE_DEPTH];  // Queued commands
+integer nHead;                            // Queue head pointer
+integer nTail;                            // Queue tail pointer
+
+// STRING
+
+
+/***********************************************************************
+  Functions
+  (Add any additional functions here)
+  Note:  Functions must be physically placed before the location in
+         the code that calls them.
+***********************************************************************/
+
+// Queue is Empty when Head is one more than tail.
+integer_function IsEmpty()
+{
+  return (((nHead - 1) = nTail) || (nHead = 1 && nTail = QUEUE_WIDTH));
+}
+
+integer_function IsFull()
+{
+  return ((nHead = (nTail -1)) || (nTail = 1 && nHead = QUEUE_WIDTH));
+}
+
+integer_function QueueSize()
+{
+  if (IsEmpty())
+    return (0);
+  else if (nHead > nTail)
+    return (nHead - (nTail + 1));
+  else if (nHead < nTail)
+    return (nHead + (QUEUE_WIDTH - nTail + 1));
+  else
+    // Error !! Should never be equal...
+    return (0);
+}
+
+// Update the queue status
+function DoQueueStatus()
+{
+  // trace("%s: DoQueueStatus",MODULE_NAME);
+
+  // HasElements = !IsEmpty();
+  NumElements = QueueSize();
+
+  //[vdvQueue, CH_FULL] = IsFull();
+}
+
+// DoPush: Queue command to be sent to device
+function DoPush(string _sData)
+{
+  if (IsFull())
+  {
+    trace("%s: DoPush: Cannot push. Tail=%d Head=%d Data[%s]", MODULE_NAME,nTail, nHead, _sData);
+    //pulse[vdvQueue, CH_OVERFLOW];
+  }
+  else
+  {
+    // trace("%s: DoPush: Tail=%d Head=%d Data[%s]", MODULE_NAME,nTail, nHead, _sData);
+
+    // nHead points to the next free slot in queue.
+    // Fill it with incoming data.
+    sQueue[nHead] = _sData;
+
+    // Then increment the head
+    if (nHead = QUEUE_WIDTH)
+      nHead = 1;
+    else
+      nHead = nHead + 1;
+
+    HasElements = TRUE;
+    DoQueueStatus();
+  }
+}
+
+// DoPop: Process queued messages
+function DoPop()
+{
+  if (IsEmpty())
+  {
+    HasElements = FALSE;
+    // trace("%s: DoPop: Empty queue.",MODULE_NAME);
+  }
+  else
+  {
+    // Increment the tail, then send the data.
+    if (nTail = QUEUE_WIDTH)
+      nTail = 1;
+    else
+      nTail = nTail + 1;
+
+    // trace("%s: DoPop: Tail=%d Head=%d Data[%s]",MODULE_NAME,nTail,nHead,sQueue[nTail]);
+
+    // Send out data
+    Out$ = sQueue[nTail];
+    // MakeString(Out$,"%s",sQueue[nTail]);
+
+    DoQueueStatus();
+  }
+}
+
+// Flush: Discard queued commands
+function Flush()
+{
+  if (!IsEmpty())
+  {
+    nTail = QUEUE_WIDTH;
+    nHead = 1;
+  }
+}
+
+function Initialise()
+{
+  nHead = 1;                        // Queue head pointer
+  nTail = QUEUE_WIDTH;              // Queue tail pointer
+  // trace("%s: Resetting to defaults\r",MODULE_NAME);
+  Flush();
+}
+
+
+/***********************************************************************
+  Event Handlers
+  (Uncomment and declare additional event handlers as needed)
+***********************************************************************/
+
+push Init
+{
+  Initialise();
+}
+             
+change In$
+{
+  DoPush(In$);
+}
+
+push Pop
+{
+  DoPop();
+}
+
+/***********************************************************************
+  Main()
+  Uncomment and place one-time startup code here
+  (This code will get called when the system starts up)
+***********************************************************************/
+
+Function Main()
+{
+  Initialise();
+}
+

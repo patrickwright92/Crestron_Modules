@@ -1,0 +1,634 @@
+/*******************************************************************************************
+ 
+Program Name:	NEC Projector NCxx.usp
+Programmer:		Patrick Wright
+Purpose / Notes:	
+					Module to control a NEC Projector NCxx series
+********************************************************************************************/
+
+#CATEGORY "24" // TV/Video Projector
+ 
+#SYMBOL_NAME "NEC_Projector_NCxx"
+
+#default_volatile
+#enable_stack_checking
+#large_stack
+
+#user_library "UtilLib_DisplayCommonFunctions"
+#user_library "LibStrings"
+
+//the projector will return useful commands 8 characters long                                     
+//#define_constant nPROJ_RESPONSE_LEN 8
+
+#define_constant nMAX_DISPLAY_RESP_LEN 1000
+#define_constant nVOL_CMD_STR_LEN 12
+//#define_constant nMAX_PROJ_INPUT_BUFFER_LEN 255
+#define_constant nMAX_DISPLAY_ID_LEN 1
+
+
+//#define_constant nDISPLAY_POLL_GENERIC 120
+
+/***************************************************/                                        
+/*   Display Commands                              */
+/***************************************************/
+//power
+#define_constant sDISPLAY_POWER_ON	    "\x02\x00\x00\x00\x00\x02"
+#define_constant sDISPLAY_POWER_OFF     "\x02\x01\x00\x00\x00\x03"
+      
+//inputs
+#define_constant sDISPLAY_INPUT_SDI_1	  "\x02\x03\x00\x00\x02\x05\x1A\x26"	 //SDI A
+#define_constant sDISPLAY_INPUT_SDI_2	  "\x02\x03\x00\x00\x02\x05\x1B\x27"	 //SDI B
+#define_constant sDISPLAY_INPUT_SDI_3	  "\x02\x03\x00\x00\x02\x05\x1C\x28"	 //SDI Dual (AB)
+              
+#define_constant sDISPLAY_INPUT_SDI_4	  "\x02\x03\x00\x00\x02\x05\x3D\x49"	 //SDI C
+#define_constant sDISPLAY_INPUT_SDI_5	  "\x02\x03\x00\x00\x02\x05\x3E\x4A"	 //SDI D
+#define_constant sDISPLAY_INPUT_SDI_6	  "\x02\x03\x00\x00\x02\x05\x3F\x4B"	 //SDI Dual (CD)
+
+#define_constant sDISPLAY_INPUT_SDI_7	  "\x02\x03\x00\x00\x02\x05\x40\x4C"	 //SDI Quad (ABCD)
+
+#define_constant sDISPLAY_INPUT_DVI_1	  "\x02\x03\x00\x00\x02\x05\x38\x44"	 //DVI A
+#define_constant sDISPLAY_INPUT_DVI_2	  "\x02\x03\x00\x00\x02\x05\x39\x45"	 //DVI B
+#define_constant sDISPLAY_INPUT_DVI_3	  "\x02\x03\x00\x00\x02\x05\x3A\x46"	 //DVI Dual
+
+//vmute
+#define_constant sDISPLAY_VMUTE_ON	    "\x02\x10\x00\x00\x00\x12"
+#define_constant sDISPLAY_VMUTE_OFF     "\x02\x11\x00\x00\x00\x13"
+
+//amute
+#define_constant sDISPLAY_AMUTE_ON	    "NOT SUPPORTED"
+#define_constant sDISPLAY_AMUTE_OFF     "NOT SUPPORTED"
+
+//aspect
+//#define_constant sDISPLAY_ASPECT_16_9 "ASPECT 20\n"
+//#define_constant sDISPLAY_ASPECT_04_3 "ASPECT 00\n"
+//#define_constant sDISPLAY_ASPECT_ZOOM "ASPECT 50\n"
+//#define_constant sDISPLAY_ASPECT_AUTO "ASPECT 20\n"
+
+//auto adjust (APA)
+#define_constant sDISPLAY_APA           "NOT SUPPORTED"
+
+//volume
+#define_constant sDISPLAY_VOLUME_LEV 		"NOT SUPPORTED" //+ lowerdata + "\x\" + upperdata(\x00) + "\x\" + cks (\x1D + LD)
+#define_constant sDISPLAY_VOLUME_UP 		"NOT SUPPORTED" // + lowerdata + upperdata(\x00) + cks
+#define_constant sDISPLAY_VOLUME_DOWN 	"NOT SUPPORTED" // + lowerdata + upperdata(\x00) + cks
+        
+//Response variables
+//input response values
+#define_constant sDISPLAY_INPUT_SDI_A_B       6
+#define_constant sDISPLAY_INPUT_SDI_C_D       13
+#define_constant sDISPLAY_INPUT_DVI           12
+
+#define_constant nTYPE_INPUT_FIRST            1
+#define_constant nTYPE_INPUT_SECOND           2
+#define_constant nTYPE_INPUT_DUAL             3
+#define_constant nTYPE_INPUT_QUAD             4
+              
+//power positions
+//#define_constant nPROJ_ID_POS           1
+//#define_constant nPROJ_MODEL_POS        2
+#define_constant nPROJ_POWER_POS        6 //Data 3
+                         
+//for input response
+#define_constant nPROJ_SOURCE_NUM_POS   6 //Data 3
+#define_constant nPROJ_SOURCE_TYPE_POS  7 //Data 4
+
+//for Video Mute response
+#define_constant nPROJ_VMUTE_POS        4 //Data 1
+              
+//Lamp hour positions
+#define_constant nPROJ_LAMP_1_POS       7
+#define_constant nPROJ_LAMP_2_POS       6
+#define_constant nPROJ_LAMP_3_POS       5
+#define_constant nPROJ_LAMP_4_POS       4
+
+/****************************************************/
+/*     Poll Commands                                */
+/****************************************************/
+//all commands have the needed data in the first 13 bytes of
+//the message
+#define_constant nUSEFUL_DATA_LEN       11
+#define_constant nLAMP_DATA_USEFUL_LEN  8
+
+                                    
+#define_constant sDISPLAY_POLL_POWER      "\x00\x85\x00\x00\x01\x01\x87"
+#define_constant sDISPLAY_POLL_INPUT		  "\x00\x85\x00\x00\x01\x02\x88"         
+#define_constant sDISPLAY_POLL_VMUTE		  "\x00\x85\x00\x00\x01\x03\x89"
+
+//same response to all status requests
+#define_constant sPROJECTOR_POLL_RESP		  "\x20\x85"
+            
+//***POWER RESPONSE***
+//Response 20H, 85H, (Proj ID: 01H), (Proj Model: In case of M402 series	20H), 10H, DATA01 ... DATA16, CHK
+//DATA01 - Reserved
+//DATA02 - External Control Status 00H - Off, 01H - On
+//DATA03 - Power Status 00H - Power Off, 01H - Power On
+//DATA04 Lamp Cooling Processing
+//       00H : No execution
+//       01H : During execution
+//DATA05 Power On/Off Processing
+//       00H : No execution
+//       01H : During execution
+//DATA06 Projector Process Status
+//       00H : Standby
+//       01H : Power On Protect (before Lamp control)
+//       02H : Ignition (If unlit, change 09H for retrying)
+//       03H : Power On Running (after Lamp control)
+//       04H : Running (Power On / Lamp On)
+//       05H : Cooling
+//       06H : --------- (Reserved)
+//       07H : Reset Wait
+//       08H : Fan Stop Error (before Cooling)
+//       09H : Lamp Retry
+//       0AH : Lamp Error (before Cooling)
+//       0CH : Running (Power On / Lamp Off)
+//DATA07-8 Reserved
+//DATA09 Store Processing (NC)
+//       00H : No execution
+//       01H : During execution
+//DATA10 Lamp Status (NC)
+//       00H : Lamp Off
+//       01H : Lamp On
+//DATA11 Processing of Lamp On/Off (NC1500C/NC1600C/NC2500S)
+//       00H : No execution
+//       01H : During execution
+//DATA12 Reserved
+//DATA13-14 Cooling Remaining Time(in sec) (NC)
+//DATA13: Lower 8 bit
+//DATA14: Higher 8 bit
+//DATA15-16 Reserved
+
+//***INPUT RESPONSE***
+//Response 20H, 85H, (Proj ID: 01H), (Proj Model: In case of M402 series	20H), 10H, DATA01 ... DATA16, CHK
+//DATA01 - Selecting signal processing 00H-No execution, 01H-During execution
+//DATA02 - Indication signal number 0 - 99
+//DATA03&04 - 01H,06H - SDI A
+//          - 02H,06H - SDI B
+//          - 01H,0DH - SDI C
+//          - 02H,0DH - SDI D
+//          - 03H,06H - SDI Dual (AB)
+//          - 03H,0DH - SDI Dual (CD)
+//          - 01H,0CH - DVI A
+//          - 02H,0CH - DVI B
+//          - 03H,0CH - DVI Dual/Twin 
+
+//***VMUTE RESPONSE***
+//Response 20H, 85H, (Proj ID: 01H), (Proj Model: In case of M402 series	20H), 10H, DATA01 ... DATA16, CHK
+//DATA01 - 00H - Off, 01H - On, 01H - On (When lens shutter closed)
+
+#define_constant sDISPLAY_POLL_LAMP_HOURS  "\x03\x94\x00\x00\x00\x97"
+#define_constant sPOLL_LAMP_RESP			     "\x23\x94"
+//#define_constant nPOLL_LAMP_RESP_LEN		   22
+//Response 23H 94H 01H xxH 05H DATA01 .. DATA05 CKS - DATA04-DATA01 = lamp time in seconds
+    
+//passthrough
+#define_constant sDISPLAY_RECALL_PRESET_1	     "\x02\x03\x00\x00\x02\x06\x00\x0D" //This needs to be done on system start
+#define_constant nDISPLAY_RECALL_PRESET_1_NUM  1
+#define_constant sDISPLAY_RECALL_PRESET_6	     "\x02\x03\x00\x00\x02\x06\x05\x12" //This needs to be done on system start
+#define_constant nDISPLAY_RECALL_PRESET_6_NUM  2
+
+
+
+
+/*******************************************************/          
+                 
+//module inputs
+digital_input _skip_, _skip_;
+buffer_input biDisplayResponse$[nMAX_DISPLAY_RESP_LEN];
+analog_input aiPollCmd;
+analog_input aiDebugLev;
+  
+analog_input aiOneTypeCmd;
+analog_input aiLampHoursCmd;
+
+analog_input aiDisplayCmd[nMAX_DISPLAY_FUNCTIONS];
+
+               
+//module outputs
+digital_output _skip_, _skip_;
+string_output soDisplayCmd$;
+analog_output aoDisplayFB[nMAX_DISPLAY_FUNCTIONS];
+analog_output aoLampHoursFB[nMAX_DISPLAY_LAMPS];
+            
+
+//module parameters
+string_parameter spDisplayID[nMAX_DISPLAY_ID_LEN];
+
+#begin_parameter_properties spDisplayID
+  propValidUnits=unitString;
+  propDefaultUnit=unitString;
+  propDefaultValue="0"; 
+  propShortDescription="Display ID, 0 to 255";
+#end_parameter_properties
+
+ 
+//global variables         
+integer nLastCmd;
+integer nLampNumberRsp;
+integer bRXOK;
+integer nDisplayID;
+//string sProjInput[nMAX_PROJ_INPUT_BUFFER_LEN];
+
+
+      
+function sendDisplayCmd(string _sProjCmd)
+{	       
+	//make sure that the projector command exists
+	if(len(_sProjCmd) > 1)
+		soDisplayCmd$ = _sProjCmd;
+}
+                     
+function convertPowerResp(string _sProjResp)
+{
+  string _errMsg[nERR_MSG_LEN];
+	integer _nPowerRsp;
+               
+  //makestring(_errMsg, "Power Rsp: %s\n", StrToHex(_sProjResp));
+  //fnDebugMsg(_errMsg, getSymbolReferenceName(), 5, aiDebugLev);
+
+	_nPowerRsp = byte(_sProjResp, nPROJ_POWER_POS);
+      
+	switch(_nPowerRsp)
+	{
+    case(0):	aoDisplayFB[nDISPLAY_POWER] = nVAL_POWER_OFF;
+		case(1):	aoDisplayFB[nDISPLAY_POWER] = nVAL_POWER_ON;
+		default:	aoDisplayFB[nDISPLAY_POWER] = nVAL_STATE_UNKNOWN;
+	}
+}
+
+function convertInputResp(string _sProjResp)
+{
+	integer _nSourceNum;
+	integer _nSourceType;
+
+	//byte 7 - DATA03 - Signal
+	//byte 8 - DATA04 - Source Input Num
+	_nSourceNum = byte(_sProjResp, nPROJ_SOURCE_NUM_POS);
+
+	//byte 9 - DATA05 - Source Input Type
+	_nSourceType = byte(_sProjResp, nPROJ_SOURCE_TYPE_POS);
+       
+//            01H,06H - SDI A
+//          - 02H,06H - SDI B
+//          - 01H,0DH - SDI C
+//          - 02H,0DH - SDI D
+//          - 03H,06H - SDI Dual (AB)
+//          - 03H,0DH - SDI Dual (CD)
+//          = 04H,0DH - SDI Quad (ABCD)
+//          - 01H,0CH - DVI A
+//          - 02H,0CH - DVI B
+//          - 03H,0CH - DVI Dual/Twin 
+
+	switch(_nSourceNum)
+	{
+    case(nTYPE_INPUT_FIRST):
+    {
+      if(_nSourceType = sDISPLAY_INPUT_SDI_A_B)      {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_SDI, 1);} //SDI A
+      else if(_nSourceType = sDISPLAY_INPUT_SDI_C_D) {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_SDI, 4);} //SDI C
+      else if(_nSourceType = sDISPLAY_INPUT_DVI)     {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_DVI, 1);} //DVI A
+      else {aoDisplayFB[nDISPLAY_INPUT] = nVAL_STATE_UNKNOWN;}
+    }
+    case(nTYPE_INPUT_SECOND):
+    {
+      if(_nSourceType = sDISPLAY_INPUT_SDI_A_B)      {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_SDI, 2);} //SDI B
+      else if(_nSourceType = sDISPLAY_INPUT_SDI_C_D) {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_SDI, 5);} //SDI D
+      else if(_nSourceType = sDISPLAY_INPUT_DVI)     {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_DVI, 2);} //DVI B
+      else {aoDisplayFB[nDISPLAY_INPUT] = nVAL_STATE_UNKNOWN;}
+    }
+    case(nTYPE_INPUT_DUAL):
+    {
+      if(_nSourceType = sDISPLAY_INPUT_SDI_A_B)      {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_SDI, 3);} //SDI Dual AB
+      else if(_nSourceType = sDISPLAY_INPUT_SDI_C_D) {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_SDI, 6);} //SDI Dual CD
+      else if(_nSourceType = sDISPLAY_INPUT_DVI)     {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_DVI, 3);} //DVI Dual/Twin
+      else {aoDisplayFB[nDISPLAY_INPUT] = nVAL_STATE_UNKNOWN;}
+    }
+    case(nTYPE_INPUT_QUAD):
+    {
+      if(_nSourceType = sDISPLAY_INPUT_SDI_C_D) {aoDisplayFB[nDISPLAY_INPUT] = codeInput(nTYPE_INPUT_SDI, 7);} //SDI Quad
+    }
+
+		default: aoDisplayFB[nDISPLAY_INPUT] = nVAL_STATE_UNKNOWN;
+	}
+}
+      
+function convertVMuteResp(string _sProjResp)
+{
+  string _errMsg[nERR_MSG_LEN];
+	integer _nVMuteRsp;
+
+	_nVMuteRsp = byte(_sProjResp, nPROJ_VMUTE_POS);
+          
+	switch(_nVMuteRsp)
+	{
+    case(0):	aoDisplayFB[nDISPLAY_VMUTE] = nVAL_VMUTE_OFF;
+		case(1):	aoDisplayFB[nDISPLAY_VMUTE] = nVAL_VMUTE_ON;
+    case(2):	aoDisplayFB[nDISPLAY_VMUTE] = nVAL_VMUTE_ON;
+    case(129): aoDisplayFB[nDISPLAY_VMUTE] = nVAL_VMUTE_ON; //81Hex on when shutter closed
+		default:	aoDisplayFB[nDISPLAY_VMUTE] = nVAL_STATE_UNKNOWN;
+	}
+}
+
+function convertLampResp(string _sProjResp)
+{
+  string _errMsg[nERR_MSG_LEN];
+
+//Response 23H 8CH 01H xxH 10H DATA01 .. DATA16 CKS DATA04-DATA01 = lamp time in seconds
+	integer _nLamp1;
+	integer _nLamp2;
+	integer _nLamp3;
+	integer _nLamp4;
+	long_integer _nLampTime;
+           
+  //if(len(_sProjResp))
+  //{
+		_nLamp1 = byte(_sProjResp, nPROJ_LAMP_1_POS);
+		_nLamp2 = byte(_sProjResp, nPROJ_LAMP_2_POS);
+		_nLamp3 = byte(_sProjResp, nPROJ_LAMP_3_POS);
+		_nLamp4 = byte(_sProjResp, nPROJ_LAMP_4_POS);
+	
+		_nLampTime = (_nLamp1 << 24) + (_nLamp2 << 16) + (_nLamp3 << 8) + _nLamp4;
+	      
+	  makestring(_errMsg, "Lamp Rsp:: %s, curr Lamp: %lu\n", StrToHex(_sProjResp), _nLampTime);
+	  fnDebugMsg(_errMsg, getSymbolReferenceName(), 3, aiDebugLev);
+	
+	  //report lamp hours not seconds
+	  aoLampHoursFB[nLAMP_1_POLL] = _nLampTime / 3600;
+  //}
+ // else
+  //{
+  //  makestring(_errMsg, "Lamp Response no String Len\n");
+	//  fnDebugMsg(_errMsg, getSymbolReferenceName(), 0, aiDebugLev);
+  //}
+}
+
+//decode the input strings 
+change biDisplayResponse$
+{
+ 	string _sTempData[nUSEFUL_DATA_LEN];
+  string _sGarbage[nMAX_DISPLAY_RESP_LEN];
+	integer _n;
+  string _errMsg[nERR_MSG_LEN];
+   
+ 	if(bRXOK)
+	{
+		bRXOK = 0;
+      
+    //power
+    if(nLastCmd = nDISPLAY_POWER || nLastCmd = nDISPLAY_INPUT ||
+       nLastCmd = nDISPLAY_VMUTE) 
+    {
+		  if(find(sPROJECTOR_POLL_RESP, biDisplayResponse$) > 0)	//find start of poll response
+			{
+				//remove any data in the buffer before start of response
+				//_n = find(sPOLL_RESP, biDisplayResponse$);
+				//_n = _n-1;
+        //_sResponse = biDisplayResponse$;
+
+				_sGarbage = remove(sPROJECTOR_POLL_RESP, biDisplayResponse$);
+				
+				_sTempData = gatherByLength(nUSEFUL_DATA_LEN, biDisplayResponse$, 200);	//2 sec timeout
+
+        //makestring(_errMsg, "Last Command: %d\n", nLastCmd);
+        //fnDebugMsg(_errMsg, getSymbolReferenceName(), 5, aiDebugLev);
+              
+        if(len(_sTempData))
+        {
+          //decode the projector response and convert it to module feedback
+          if(nLastCmd = nDISPLAY_POWER)
+          {		      
+	    	    convertPowerResp(_sTempData);
+          }
+          else if(nLastCmd = nDISPLAY_INPUT)
+          {
+            convertInputResp(_sTempData);
+          }
+          else if(nLastCmd = nDISPLAY_VMUTE)
+          {
+            convertVMuteResp(_sTempData);
+          }
+        }
+		  }
+    }    
+      
+    //Lamp Hours
+    if(nLastCmd = nDISPLAY_LAMPHOURS)
+    {
+      //lamp hours
+		  if(find(sPOLL_LAMP_RESP, biDisplayResponse$) > 0)
+		  {
+			  //remove any data in the buffer before start of response
+			  //_n = find(sPOLL_LAMP_RESP, biDisplayResponse$);
+			  //_n = _n-1;
+			  _sGarbage = remove(sPOLL_LAMP_RESP, biDisplayResponse$);
+			
+			  _sTempData = GatherByLength(nLAMP_DATA_USEFUL_LEN, biDisplayResponse$, 200);	//2 sec timeout
+      
+	      //decode the projector response and convert it to module feedback
+    	  convertLampResp(_sTempData);
+	    }
+    }
+
+	  bRXOK = 1;
+	}  
+}
+
+change aiDisplayCmd
+{
+  integer _nDisplayCmdIndex, _nInputType, _nInputNum;
+  string _errMsg[nERR_MSG_LEN];
+
+	_nDisplayCmdIndex = GetLastModifiedArrayIndex();
+  
+  nLastCmd = nVAL_STATE_UNKNOWN;
+ 
+  //which command needs to be sent
+  switch(_nDisplayCmdIndex)
+  {
+    case(nDISPLAY_POWER):
+    {
+      //make the last command the power command
+      nLastCmd = nDISPLAY_POWER;
+
+      if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_POWER_ON) 
+      {
+        fnDebugMsg("POWER_ON_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_POWER_ON);
+      }
+      else if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_POWER_OFF)
+      {
+        fnDebugMsg("POWER_OFF_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_POWER_OFF); 
+      } 
+    }
+    case(nDISPLAY_INPUT):
+    {
+      nLastCmd = nDISPLAY_INPUT;
+
+      decodeInput(aiDisplayCmd[_nDisplayCmdIndex], _nInputType, _nInputNum);
+                      
+      makestring(_errMsg, "INPUT CMD: Type: %u, Num: %u\n", _nInputType, _nInputNum);
+      fnDebugMsg(_errMsg, getSymbolReferenceName(), 5, aiDebugLev);
+
+      switch(_nInputType)
+      {
+        case(nTYPE_INPUT_SDI): 	
+        {
+          if(_nInputNum = 1)      {sendDisplayCmd(sDISPLAY_INPUT_SDI_1);}
+          else if(_nInputNum = 2) {sendDisplayCmd(sDISPLAY_INPUT_SDI_2);}
+          else if(_nInputNum = 3) {sendDisplayCmd(sDISPLAY_INPUT_SDI_3);}
+          else if(_nInputNum = 4) {sendDisplayCmd(sDISPLAY_INPUT_SDI_4);}
+          else if(_nInputNum = 5) {sendDisplayCmd(sDISPLAY_INPUT_SDI_5);}
+          else if(_nInputNum = 6) {sendDisplayCmd(sDISPLAY_INPUT_SDI_6);}
+          else if(_nInputNum = 7) {sendDisplayCmd(sDISPLAY_INPUT_SDI_7);}
+        }  
+        case(nTYPE_INPUT_DVI): 
+        {
+          if(_nInputNum = 1)		  {sendDisplayCmd(sDISPLAY_INPUT_DVI_1);}
+          else if(_nInputNum = 2)	{sendDisplayCmd(sDISPLAY_INPUT_DVI_2);}
+          else if(_nInputNum = 3) {sendDisplayCmd(sDISPLAY_INPUT_DVI_3);}
+        }
+      }  
+    }
+    case(nDISPLAY_VMUTE):
+    {
+      nLastCmd = nDISPLAY_VMUTE;
+
+      if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_VMUTE_ON) 
+      {
+        fnDebugMsg("VIDEO_MUTE_ON_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_VMUTE_ON);
+      }
+      else if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_VMUTE_OFF)
+      {
+        fnDebugMsg("VIDEO_MUTE_OFF_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_VMUTE_OFF); 
+      } 
+    }
+    case(nDISPLAY_AMUTE):
+    {
+      nLastCmd = nDISPLAY_AMUTE;
+
+      if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_AMUTE_ON) 
+      {
+        fnDebugMsg("AUDIO_MUTE_ON_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_AMUTE_ON);
+      }
+      else if(aiDisplayCmd[_nDisplayCmdIndex] = nVAL_AMUTE_OFF)
+      {
+        fnDebugMsg("AUDIO_MUTE_OFF_CMD\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_AMUTE_OFF);
+      }
+    }
+    case(nDISPLAY_VOLUME):
+    {
+      nLastCmd = nDISPLAY_VOLUME;
+		         
+      makestring(_errMsg, "VOLUME CMD: Level: %u\n", aiDisplayCmd[_nDisplayCmdIndex]);
+      fnDebugMsg(_errMsg, getSymbolReferenceName(), 5, aiDebugLev);
+
+      //send the volume command
+      //sendDisplayCmd(makeVolString(aiDisplayCmd[_nDisplayCmdIndex])); 
+    }
+  }
+}
+   
+//send a lamp hours command. This has been seperated from
+//other commands and is out of the polling sequence as it is 
+//easier to control and is less confusing when polling multiple 
+//lamps
+change aiLampHoursCmd
+{
+  switch(aiLampHoursCmd)
+  {
+    case(nLAMP_1_POLL):
+    {
+      nLastCmd = nDISPLAY_LAMPHOURS;
+      nLampNumberRsp = nLAMP_1_POLL;
+      
+	    sendDisplayCmd(sDISPLAY_POLL_LAMP_HOURS);
+    }
+  }
+}
+
+change aiOneTypeCmd
+{       
+  integer _nPassThroughCmd;
+
+  if(aiOneTypeCmd >= nPASS_THROUGH)	//do pass through commands
+  {
+    _nPassThroughCmd = aiOneTypeCmd - nPASS_THROUGH;
+	
+	  switch(_nPassThroughCmd)
+	  {
+      case(nDISPLAY_RECALL_PRESET_1_NUM):
+      {
+        fnDebugMsg("Recalling Preset 1\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_RECALL_PRESET_1); 
+      }
+      case(nDISPLAY_RECALL_PRESET_6_NUM):
+      {
+        fnDebugMsg("Recalling Preset 1\n", getSymbolReferenceName(), 5, aiDebugLev);
+        sendDisplayCmd(sDISPLAY_RECALL_PRESET_6); 
+      }
+
+    }
+  }
+  else
+  {
+    switch(aiOneTypeCmd)
+    {
+      case(nDISPLAY_APA):
+      {
+        fnDebugMsg("SENDING_APA\n", getSymbolReferenceName(), 5, aiDebugLev);
+        nLastCmd = nDISPLAY_APA;
+
+        sendDisplayCmd(sDISPLAY_APA);
+      }
+    }
+  }
+}
+
+
+change aiPollCmd
+{
+  switch(aiPollCmd)
+  {
+    case(nDISPLAY_POWER): 
+    {
+      fnDebugMsg("POWER_POLL\n", getSymbolReferenceName(), 5, aiDebugLev);
+      nLastCmd = nDISPLAY_POWER;
+      sendDisplayCmd(sDISPLAY_POLL_POWER);
+    }
+    case(nDISPLAY_INPUT):
+    {
+      fnDebugMsg("INPUT_POLL\n", getSymbolReferenceName(), 5, aiDebugLev);
+      nLastCmd = nDISPLAY_INPUT;
+      sendDisplayCmd(sDISPLAY_POLL_INPUT);
+    }
+    case(nDISPLAY_VMUTE):
+    {
+      fnDebugMsg("VIDEO_MUTE_POLL\n", getSymbolReferenceName(), 5, aiDebugLev);
+      nLastCmd = nDISPLAY_VMUTE;
+      sendDisplayCmd(sDISPLAY_POLL_VMUTE);
+    }
+  }
+}
+             
+
+Function Main()
+{
+  //initialise global variables
+  bRXOK = 1;
+  nLastCmd = nVAL_STATE_UNKNOWN;
+  //sProjInput = "";
+     
+  nDisplayID = atoi(spDisplayID);
+
+  //validate Display ID
+  if(nDisplayID > 255)
+  {
+    nDisplayID = 0;
+    fnDebugMsg("INVALID Display ID\n", getSymbolReferenceName(), 0, aiDebugLev);
+  }
+
+  waitforinitializationcomplete();
+}

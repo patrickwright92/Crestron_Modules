@@ -1,0 +1,300 @@
+/*******************************************************************************************
+ 
+Program Name:	SubRouter Extron IN1608.usp
+Programmer:		Patrick Wright
+Purpose / Notes:	
+					Controls the Extron IN1608 series Routers from the standard router interface
+********************************************************************************************/
+
+#SYMBOL_NAME "SubRouter_Extron_IN1608"
+#HINT "Controls the Extron IN1608 Series Routers from standard Router interfac"
+#CATEGORY "23" // Switcher
+
+#HELP_BEGIN
+Controls the Extron MPS range of switches. 
+
+Audio controls included for the three audio outputs
+Audio mute is provided through code in the module
+
+Only one output so aiRDest has no impact on switch
+Only one plane so aiRPlane has no impact on switch
+Supported levels are VIDEO & AUDIO, VIDEO ONLY & AUDIO ONLY   
+
+Standard Baud Rate - 9600, 8, 1, N
+
+Programmer: Ben Macklan & Gerrard Jenner
+Modifed By: Wayne Tran
+#HELP_END
+     
+#default_volatile
+#enable_stack_checking
+#large_stack
+  
+#user_library "UtilLib_LevelDefs"
+#user_library "UtilLib_IntegerQueue"
+  
+//constants  
+#define_constant  nMAXOUTSTRING 20
+
+#define_constant nVOLUME_PROG	1
+#define_constant nVOLUME_MIC	3
+#define_constant nVOLUME_OUTPUT	8
+
+#define_constant nVOLUME_PROG_MUTE		2
+#define_constant nVOLUME_MIC_MUTE		4
+#define_constant nVOLUME_OUTPUT_MUTE	7
+
+#define_constant MUTE			1
+#define_constant UNMUTE			0
+
+// Inputs and outputs  
+digital_input _skip_, _skip_;                      
+digital_input diOsc;
+digital_input _skip_;
+digital_input diProgramMute, diMicMute, diOutputMute;
+digital_input diVideoMute;
+digital_input _skip_;
+digital_input diTakeCmd;
+analog_input aiRNum, aiRPlane, aiRLev, aiRSrc, aiRDest;
+analog_input _skip_;
+analog_input aiProgramVolume, aiMicVolume, aiOutputVolume;
+analog_input _skip_;
+buffer_input biRouterBusInput$[nMAX_ROUTER_BUS_LEN];
+analog_input _skip_;
+analog_input aiDebugLev;
+     
+digital_output _skip_, _skip_;
+digital_output doOscGateStart_PLS;
+digital_output doOscGateStop_PLS;
+string_output _skip_;
+string_output soRouterCmd$;
+            
+//module parameters
+integer_parameter ipSetRouterNum;
+
+#begin_parameter_properties ipSetRouterNum
+  propValidUnits=unitDecimal;
+  propDefaultUnit=unitDecimal;
+  propDefaultValue=1d; 
+  propShortDescription="Module will only respond to commands matching this router number";
+#end_parameter_properties
+
+//global variables 
+integer nRouterQueue[nMAX_ROUTER_QUEUE_SIZE][nNUM_ROUTER_QUEUE_VALUES];
+
+integer nQueuePopCount;
+integer nQueuePushCount;
+integer nQueueCount;         
+
+signed_integer nCurrentVolumeProgram;
+signed_integer nCurrentVolumeMicrophone;
+signed_integer nCurrentVolumeOutput;
+     
+                                   
+//***************************************************                                                                             
+//function declarations
+//***************************************************
+
+//send the router string here
+//NOTE: This should be the only function that needs changing for most routers        
+function sendRouterCmd(integer _nPlane, integer _nLevel, integer _nDest, integer _nSrc)
+{    
+	string _sOutString[nMAXOUTSTRING];
+
+	switch(_nLevel)
+	{  	
+		case(nLEV_VIDEO_AND_AUDIO):
+		{
+	    makestring(_sOutString, "%d!", _nSrc);
+			soRouterCmd$ = _sOutString;
+		}
+		case(nLEV_AUDIO_ONLY):
+		{
+      makestring(_sOutString, "%d$", _nSrc);
+      soRouterCmd$ = _sOutString;
+		}
+		case(nLEV_VIDEO_ONLY):
+		{
+      makestring(_sOutString, "%d&", _nSrc);
+      soRouterCmd$ = _sOutString;
+		}
+	}
+}
+
+function setVolumeLevel(integer _nOutput, signed_integer _nLevel)
+{
+	//volume is already scaled between -1000 to 0 (-100dB to 0dB)
+ 	string _sOutString[nMAXOUTSTRING];
+
+	makestring(_sOutString, "\x1BD%d*%dGRPM\x0D", _nOutput, _nLevel);
+	soRouterCmd$ = _sOutString;	
+}
+
+function muteVolume(integer _nOutput, integer _nStatus)
+{
+	string _sOutString[nMAXOUTSTRING];
+
+	makestring(_sOutString, "\x1BD%d*%dGRPM\x0D", _nOutput, _nStatus);
+	soRouterCmd$ = _sOutString;	
+}
+
+function muteOutputVideo(integer _nMuteStatus)
+{
+	switch(_nMuteStatus)
+	{
+		case(MUTE):		
+		{
+			soRouterCmd$ = "1*1B";
+			wait(10)
+				soRouterCmd$ = "2*1B";
+			wait(20)
+				soRouterCmd$ = "3*1B";
+		}
+		case(UNMUTE):
+		{
+			soRouterCmd$ = "1*0B";
+			wait(10)
+				soRouterCmd$ = "2*0B";
+			wait(20)
+				soRouterCmd$ = "3*0B";
+		}
+	}
+}
+ 
+threadsafe change biRouterBusInput$
+{            
+  string _sTempData[255];
+  integer _nNewRouterCmd[nNUM_ROUTER_QUEUE_VALUES];
+  integer _nRNum;
+  integer _nOKTOPush;
+  integer _nOscState;
+  
+	while(1) 
+	{
+		_sTempData = gather(sROUTER_STRING_TERMINATOR, biRouterBusInput$);
+	     
+           
+    if(fnRouterBusDecode(_sTempData, ipSetRouterNum, _nNewRouterCmd))
+    {
+          
+	    if(aiDebugLev >= 1)
+		  {
+		    print("Pushing New Cmd: Lev: %d, Src: %d, Dest: %d\n", _nNewRouterCmd[nROUTER_LEVEL], _nNewRouterCmd[nROUTER_SOURCE], _nNewRouterCmd[nROUTER_DEST]);
+		  }
+		
+		  integerQueuePush(_nNewRouterCmd, nNUM_ROUTER_QUEUE_VALUES, nRouterQueue, nQueuePushCount, nQueueCount, _nOscState, nMAX_ROUTER_QUEUE_SIZE);                 
+		   
+	    if(aiDebugLev >= 3)
+		  {
+		    print("_nOscState: %d, nQueuePushCount: %d, nQueueCount: %d\n", _nOscState, nQueuePushCount, nQueueCount);
+		  }
+	
+	    //start the oscillator
+	    doOscGateStart_PLS = 1;
+	    doOscGateStart_PLS = 0;
+    }
+  }  
+}
+
+push diTakeCmd 
+{
+	integer _nNewRouterCmd[nNUM_ROUTER_QUEUE_VALUES];
+	integer _nOscState;
+   
+	//don't run this route if it is not meant for this router
+	if(ipSetRouterNum = aiRNum)
+ 	{
+		if(aiDebugLev >= 1)
+		{
+	  		print("Pushing New Cmd: Lev: %d, Dest: %d, Src: %d\n", aiRLev, aiRDest, aiRSrc);
+		}
+	  
+   	_nNewRouterCmd[nROUTER_PLANE]	= aiRPlane;
+		_nNewRouterCmd[nROUTER_LEVEL]	= aiRLev;
+		_nNewRouterCmd[nROUTER_DEST]	= aiRDest;
+		_nNewRouterCmd[nROUTER_SOURCE]	= aiRSrc;
+	
+		integerQueuePush(_nNewRouterCmd, nNUM_ROUTER_QUEUE_VALUES, nRouterQueue, nQueuePushCount, nQueueCount, _nOscState, nMAX_ROUTER_QUEUE_SIZE);                 
+	   
+		//dont change the gate if it is already on
+		//if(_nOscState && !doOscGate)
+		//    doOscGate = 1;
+    doOscGateStart_PLS = 1;
+    doOscGateStart_PLS = 0;
+	}
+}
+
+push diOsc
+{
+	integer _nPopOk, _nOscState;
+	integer _nRouterCmd[nNUM_ROUTER_QUEUE_VALUES];
+
+ 	_nPopOk = integerQueuePop(_nRouterCmd, nNUM_ROUTER_QUEUE_VALUES, nRouterQueue, nQueuePopCount, nQueueCount, _nOscState, nMAX_ROUTER_QUEUE_SIZE);
+ 
+  if(_nPopOk)
+		sendRouterCmd(_nRouterCmd[nROUTER_PLANE], _nRouterCmd[nROUTER_LEVEL], _nRouterCmd[nROUTER_DEST], _nRouterCmd[nROUTER_SOURCE]);
+
+	//dont stop the oscillator until 1 full extra oscillation has completed.
+	//This will prevent the oscillator from constantly turning on and
+	//off as values are added and removed
+	if(!_nOscState && !_nPopOk)
+	{ //	doOscGate = 0;
+    doOscGateStop_PLS = 1;
+    doOscGateStop_PLS = 0;
+  }
+}
+
+change aiProgramVolume
+{
+	setVolumeLevel(nVOLUME_PROG, aiProgramVolume);
+	nCurrentVolumeProgram =  aiProgramVolume;
+}
+
+change aiMicVolume
+{
+	setVolumeLevel(nVOLUME_MIC, aiMicVolume);
+	nCurrentVolumeMicrophone =  aiMicVolume;
+}
+
+change aiOutputVolume
+{
+	setVolumeLevel(nVOLUME_OUTPUT, aiOutputVolume);
+	nCurrentVolumeOutput =  aiOutputVolume;
+}
+  
+//Manual audio mute
+/*
+push 	diProgramMute	{	setVolumeLevel(nVOLUME_PROG, -1000);					}
+release diProgramMute	{	setVolumeLevel(nVOLUME_PROG, nCurrentVolumeProgram);	}
+
+push 	diMicMute		{	setVolumeLevel(nVOLUME_MIC, -1000);						}
+release diMicMute		{	setVolumeLevel(nVOLUME_MIC, nCurrentVolumeMicrophone);	}
+
+push 	diOutputMute	{	setVolumeLevel(nVOLUME_OUTPUT, -1000);					}
+release diOutputMute	{	setVolumeLevel(nVOLUME_OUTPUT, nCurrentVolumeOutput);	}
+*/
+
+push 	diProgramMute	{	muteVolume(nVOLUME_PROG_MUTE, MUTE);	}
+release diProgramMute	{	muteVolume(nVOLUME_PROG_MUTE, UNMUTE);	}
+
+push 	diMicMute		{	muteVolume(nVOLUME_MIC_MUTE, MUTE);		}
+release diMicMute		{	muteVolume(nVOLUME_MIC_MUTE, UNMUTE);	}
+
+push 	diOutputMute	{	muteVolume(nVOLUME_OUTPUT_MUTE, MUTE);		}
+release diOutputMute	{	muteVolume(nVOLUME_OUTPUT_MUTE, UNMUTE);	}
+
+push	diVideoMute		{	muteOutputVideo(MUTE);		}
+release	diVideoMute		{	muteOutputVideo(UNMUTE);	}
+
+function main() {
+         
+  integer _nRouterOscState;
+
+   //initialise the queue variables
+  initIntegerQueue(nQueuePopCount, nQueuePushCount, nQueueCount, _nRouterOscState);                     
+
+  WaitForInitializationComplete();   
+
+  doOscGateStop_PLS = 1;
+  doOscGateStop_PLS = 0;
+}
